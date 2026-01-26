@@ -1,6 +1,6 @@
 import { storageService } from './storage';
 
-export type AIModel = 'gemini' | 'deepseek' | 'openai';
+export type AIModel = 'gemini' | 'deepseek' | 'openai' | 'openrouter';
 
 export interface GeminiModelOption {
   id: string;
@@ -13,6 +13,7 @@ export interface AIModelConfig {
   name: string;
   apiKeyName: string;
   models: string[];
+  isFree?: boolean;
 }
 
 export const GEMINI_MODELS: GeminiModelOption[] = [
@@ -43,6 +44,13 @@ export const AI_MODELS: Record<AIModel, AIModelConfig> = {
     name: 'OpenAI (ChatGPT)',
     apiKeyName: 'openai',
     models: ['gpt-4o-mini', 'gpt-4o', 'gpt-3.5-turbo']
+  },
+  openrouter: {
+    id: 'openrouter',
+    name: 'OpenRouter (Free Models)',
+    apiKeyName: 'openrouter',
+    models: ['openchat/openchat-7b:free', 'nousresearch/nous-hermes-2-mistral-7b-dpo:free', 'undi95/toppy-m-7b:free'],
+    isFree: true
   }
 };
 
@@ -51,8 +59,8 @@ export const getApiKey = (provider: AIModel): string | null => {
   const config = AI_MODELS[provider];
   if (!config) return null;
   
-  // Try localStorage first
-  const savedKey = storageService.getApiKey(config.apiKeyName);
+  // Try localStorage first (for API keys, we'll use localStorage for now)
+  const savedKey = localStorage.getItem(`api_key_${config.apiKeyName}`);
   if (savedKey) return savedKey;
   
   // Fallback to environment variable
@@ -64,7 +72,7 @@ export const getApiKey = (provider: AIModel): string | null => {
 export const getSelectedModel = (): AIModel => {
   try {
     const saved = localStorage.getItem('selected_ai_model');
-    if (saved && (saved === 'gemini' || saved === 'deepseek' || saved === 'openai')) {
+    if (saved && (saved === 'gemini' || saved === 'deepseek' || saved === 'openai' || saved === 'openrouter')) {
       return saved as AIModel;
     }
   } catch (error) {
@@ -333,6 +341,72 @@ export const callOpenAIAPI = async (prompt: string, apiKey: string, model?: stri
   throw new Error('Invalid response from OpenAI API');
 };
 
+// OpenRouter API call (Free models via OpenRouter)
+const callOpenRouterAPI = async (prompt: string, apiKey: string, model?: string): Promise<string> => {
+  // List of OpenRouter free models to try in order of preference
+  const modelsToTry = model ? [model] : AI_MODELS.openrouter.models;
+  
+  let lastError: Error | null = null;
+  
+  for (const modelName of modelsToTry) {
+    try {
+      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+          'HTTP-Referer': window.location.origin,
+          'X-Title': 'Medical Assistant'
+        },
+        body: JSON.stringify({
+          model: modelName,
+          messages: [
+            {
+              role: 'system',
+              content: 'You are a helpful medical assistant. Provide clear, accurate health information and suggest when to see a doctor. Always include a disclaimer that you are not a substitute for professional medical advice.'
+            },
+            {
+              role: 'user',
+              content: prompt
+            }
+          ],
+          temperature: 0.7,
+          max_tokens: 500
+        })
+      });
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: { message: `HTTP ${response.status}` } }));
+        const errorMsg = error.error?.message || `OpenRouter API error (${response.status})`;
+        lastError = new Error(errorMsg);
+        console.warn(`❌ Model ${modelName} failed: ${errorMsg}`);
+        continue; // Try next model
+      }
+
+      const data = await response.json();
+      
+      if (data.choices && data.choices[0]?.message?.content) {
+        console.log(`✅ OpenRouter API call successful with model: ${modelName}`);
+        return data.choices[0].message.content.trim();
+      }
+      
+      lastError = new Error('Invalid response format from OpenRouter API');
+      continue;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      console.warn(`❌ Model ${modelName} error: ${lastError.message}`);
+      continue; // Try next model
+    }
+  }
+  
+  // If all models failed, throw the last error
+  if (lastError) {
+    throw lastError;
+  }
+  
+  throw new Error('No OpenRouter models available. Please check your API key or try again later.');
+};
+
 // Unified AI API call function
 export const callAIAPI = async (prompt: string, model?: AIModel): Promise<string> => {
   const selectedModel = model || getSelectedModel();
@@ -344,17 +418,38 @@ export const callAIAPI = async (prompt: string, model?: AIModel): Promise<string
 
   console.log(`🤖 Calling ${AI_MODELS[selectedModel].name} API...`);
 
-  switch (selectedModel) {
-    case 'gemini':
-      const geminiModel = getSelectedGeminiModel();
-      console.log(`Using Gemini model: ${geminiModel}`);
-      return await callGeminiAPI(prompt, apiKey, geminiModel);
-    case 'deepseek':
-      return await callDeepSeekAPI(prompt, apiKey);
-    case 'openai':
-      return await callOpenAIAPI(prompt, apiKey);
-    default:
-      throw new Error(`Unsupported AI model: ${selectedModel}`);
+  try {
+    switch (selectedModel) {
+      case 'gemini':
+        const geminiModel = getSelectedGeminiModel();
+        console.log(`Using Gemini model: ${geminiModel}`);
+        return await callGeminiAPI(prompt, apiKey, geminiModel);
+      case 'deepseek':
+        return await callDeepSeekAPI(prompt, apiKey);
+      case 'openai':
+        return await callOpenAIAPI(prompt, apiKey);
+      case 'openrouter':
+        return await callOpenRouterAPI(prompt, apiKey);
+      default:
+        throw new Error(`Unsupported AI model: ${selectedModel}`);
+    }
+  } catch (error) {
+    // If OpenRouter fails, try fallback to Gemini
+    if (selectedModel === 'openrouter') {
+      console.warn(`⚠️ OpenRouter failed, attempting fallback to Gemini...`);
+      try {
+        const geminiKey = getApiKey('gemini');
+        if (geminiKey) {
+          const geminiModel = getSelectedGeminiModel();
+          console.log(`📱 Fallback: Using Gemini model: ${geminiModel}`);
+          return await callGeminiAPI(prompt, geminiKey, geminiModel);
+        }
+      } catch (fallbackError) {
+        console.error('Fallback to Gemini also failed:', fallbackError);
+      }
+    }
+    // If all else fails, rethrow the original error
+    throw error;
   }
 };
 

@@ -1,4 +1,6 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { supabase } from '../lib/supabaseClient';
+import type { User as SupabaseUser } from '@supabase/supabase-js';
 
 interface User {
   uid: string;
@@ -10,7 +12,7 @@ interface AuthContextType {
   user: User | null;
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, name: string) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
   loading: boolean;
   initializing: boolean;
   resetPassword: (email: string) => Promise<void>;
@@ -30,48 +32,70 @@ interface AuthProviderProps {
   children: ReactNode;
 }
 
+const convertSupabaseUser = (supabaseUser: SupabaseUser | null): User | null => {
+  if (!supabaseUser) return null;
+  return {
+    uid: supabaseUser.id,
+    email: supabaseUser.email || null,
+    displayName: supabaseUser.user_metadata?.name || supabaseUser.email?.split('@')[0] || null
+  };
+};
+
 export const AuthProvider = ({ children }: AuthProviderProps) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(false);
   const [initializing, setInitializing] = useState(true);
 
   useEffect(() => {
-    // Check for stored user data on app start
-    const storedUser = localStorage.getItem('rakshith360_user');
-    if (storedUser) {
+    // Check for existing session on app start
+    const checkSession = async () => {
       try {
-        setUser(JSON.parse(storedUser));
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          setUser(convertSupabaseUser(session.user));
+        }
       } catch (error) {
-        console.error('Error parsing stored user:', error);
-        localStorage.removeItem('rakshith360_user');
+        console.error('Error checking session:', error);
+      } finally {
+        setInitializing(false);
       }
-    }
-    setInitializing(false);
+    };
+
+    checkSession();
+
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session?.user) {
+        setUser(convertSupabaseUser(session.user));
+      } else {
+        setUser(null);
+      }
+    });
+
+    return () => {
+      subscription?.unsubscribe();
+    };
   }, []);
 
   const login = async (email: string, password: string) => {
     setLoading(true);
     try {
-      // Simple validation - in a real app, you'd validate against a backend
       if (!email || !password) {
         throw new Error('Email and password are required');
       }
-      
-      // For demo purposes, accept any valid email format
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(email)) {
-        throw new Error('Please enter a valid email address');
+
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password
+      });
+
+      if (error) {
+        throw error;
       }
 
-      // Create a mock user (in a real app, this would come from your backend)
-      const mockUser: User = {
-        uid: `user_${Date.now()}`,
-        email: email,
-        displayName: email.split('@')[0] // Use email prefix as display name
-      };
-
-      setUser(mockUser);
-      localStorage.setItem('rakshith360_user', JSON.stringify(mockUser));
+      if (data.user) {
+        setUser(convertSupabaseUser(data.user));
+      }
     } catch (error) {
       console.error('Login error:', error);
       throw error;
@@ -83,29 +107,31 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const register = async (email: string, password: string, name: string) => {
     setLoading(true);
     try {
-      // Simple validation
       if (!email || !password || !name) {
         throw new Error('All fields are required');
-      }
-      
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(email)) {
-        throw new Error('Please enter a valid email address');
       }
 
       if (password.length < 6) {
         throw new Error('Password must be at least 6 characters long');
       }
 
-      // Create a mock user
-      const mockUser: User = {
-        uid: `user_${Date.now()}`,
-        email: email,
-        displayName: name
-      };
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            name: name
+          }
+        }
+      });
 
-      setUser(mockUser);
-      localStorage.setItem('rakshith360_user', JSON.stringify(mockUser));
+      if (error) {
+        throw error;
+      }
+
+      if (data.user) {
+        setUser(convertSupabaseUser(data.user));
+      }
     } catch (error) {
       console.error('Registration error:', error);
       throw error;
@@ -117,8 +143,11 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const logout = async () => {
     setLoading(true);
     try {
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        throw error;
+      }
       setUser(null);
-      localStorage.removeItem('rakshith360_user');
     } catch (error) {
       console.error('Logout error:', error);
       throw error;
@@ -133,15 +162,14 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       if (!email) {
         throw new Error('Email is required');
       }
-      
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(email)) {
-        throw new Error('Please enter a valid email address');
-      }
 
-      // In a real app, this would send a password reset email
-      // For demo purposes, just show a success message
-      console.log('Password reset email would be sent to:', email);
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/reset-password`
+      });
+
+      if (error) {
+        throw error;
+      }
     } catch (error) {
       console.error('Password reset error:', error);
       throw error;

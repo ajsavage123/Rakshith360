@@ -1,9 +1,10 @@
-// Simple storage system using localStorage
-// This provides a clean, Firebase-free storage solution
+import { supabase } from './supabaseClient';
 
 export interface ChatSession {
   id: string;
   userId: string;
+  title: string;
+  summary?: string;
   messages: Array<{
     id: number;
     text?: string;
@@ -34,84 +35,132 @@ export interface UserProfile {
 }
 
 class StorageService {
-  private getKey(key: string, userId?: string): string {
-    return userId ? `${userId}_${key}` : key;
-  }
-
-  // Helper function to safely execute localStorage operations with timeout
-  private async safeStorageOperation<T>(operation: () => T, timeoutMs: number = 3000): Promise<T> {
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error('Storage operation timed out'));
-      }, timeoutMs);
-
-      try {
-        const result = operation();
-        clearTimeout(timeout);
-        resolve(result);
-      } catch (error) {
-        clearTimeout(timeout);
-        reject(error);
-      }
-    });
-  }
-
   // Chat Sessions
   async saveChatSession(session: ChatSession): Promise<void> {
     if (!session.userId) {
       console.error("Cannot save chat session: userId is missing.");
-      return;
+      throw new Error("userId is required to save chat session");
     }
-    
+
+    if (!session.title) {
+      console.error("Cannot save chat session: title is missing.");
+      throw new Error("title is required to save chat session");
+    }
+
     try {
-      await this.safeStorageOperation(() => {
-        const key = this.getKey('chat_sessions', session.userId);
-        const existingSessions = this.getChatSessionsSync(session.userId);
-        
-        // Update or add the session
-        const sessionIndex = existingSessions.findIndex(s => s.id === session.id);
-        if (sessionIndex >= 0) {
-          existingSessions[sessionIndex] = session;
-        } else {
-          existingSessions.push(session);
+      const { error } = await supabase
+        .from('chat_sessions')
+        .upsert({
+          id: session.id,
+          user_id: session.userId,
+          title: session.title,
+          summary: session.summary,
+          updated_at: new Date().toISOString()
+        });
+
+      if (error) {
+        console.error('Supabase error saving chat session:', error);
+        throw error;
+      }
+
+      // Save messages separately
+      const messagesToSave = session.messages.map((msg, index) => ({
+        session_id: session.id,
+        role: msg.sender === 'ai' ? 'assistant' : 'user',
+        content: JSON.stringify(msg),
+        created_at: msg.timestamp?.toISOString() || new Date().toISOString()
+      }));
+
+      if (messagesToSave.length > 0) {
+        // First delete old messages for this session
+        const { error: deleteError } = await supabase
+          .from('messages')
+          .delete()
+          .eq('session_id', session.id);
+
+        if (deleteError) {
+          console.error('Error deleting old messages:', deleteError);
         }
-        
-        localStorage.setItem(key, JSON.stringify(existingSessions));
-      });
+
+        // Then insert new messages
+        const { error: msgError } = await supabase
+          .from('messages')
+          .insert(messagesToSave);
+
+        if (msgError) {
+          console.error('Supabase error saving messages:', msgError);
+          throw msgError;
+        }
+      }
+
+      console.log('✅ Chat session saved successfully:', session.id);
     } catch (error) {
       console.error('Error saving chat session:', error);
-      throw new Error('Failed to save chat session');
+      throw new Error(`Failed to save chat session: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
   async getChatSessions(userId: string): Promise<ChatSession[]> {
-    try {
-      return await this.safeStorageOperation(() => this.getChatSessionsSync(userId));
-    } catch (error) {
-      console.error('Error loading chat sessions:', error);
-      return [];
-    }
-  }
-
-  private getChatSessionsSync(userId: string): ChatSession[] {
     if (!userId) return [];
-    
+
     try {
-      const key = this.getKey('chat_sessions', userId);
-      const data = localStorage.getItem(key);
-      if (!data) return [];
-      
-      const sessions = JSON.parse(data);
-      // Convert string timestamps back to Date objects
-      return sessions.map((session: any) => ({
-        ...session,
-        createdAt: new Date(session.createdAt),
-        updatedAt: new Date(session.updatedAt),
-        messages: session.messages.map((msg: any) => ({
-          ...msg,
-          timestamp: new Date(msg.timestamp)
-        }))
-      }));
+      const { data, error } = await supabase
+        .from('chat_sessions')
+        .select('*')
+        .eq('user_id', userId)
+        .order('updated_at', { ascending: false });
+
+      if (error) throw error;
+
+      // Get messages for each session
+      const sessions = await Promise.all(
+        (data || []).map(async (session) => {
+          const { data: messages, error: msgError } = await supabase
+            .from('messages')
+            .select('*')
+            .eq('session_id', session.id);
+
+          if (msgError) {
+            console.error('Error loading messages:', msgError);
+            return {
+              id: session.id,
+              userId: session.user_id,
+              title: session.title,
+              summary: session.summary,
+              messages: [],
+              createdAt: new Date(session.created_at),
+              updatedAt: new Date(session.updated_at)
+            };
+          }
+
+          return {
+            id: session.id,
+            userId: session.user_id,
+            title: session.title,
+            summary: session.summary,
+            messages: (messages || []).map(msg => {
+              try {
+                const parsed = JSON.parse(msg.content);
+                return {
+                  ...parsed,
+                  timestamp: new Date(msg.created_at)
+                };
+              } catch {
+                return {
+                  id: Math.random(),
+                  text: msg.content,
+                  sender: msg.role === 'assistant' ? 'ai' : 'user',
+                  timestamp: new Date(msg.created_at)
+                };
+              }
+            }),
+            createdAt: new Date(session.created_at),
+            updatedAt: new Date(session.updated_at)
+          };
+        })
+      );
+
+      return sessions;
     } catch (error) {
       console.error('Error loading chat sessions:', error);
       return [];
@@ -120,13 +169,46 @@ class StorageService {
 
   async getChatSession(sessionId: string, userId: string): Promise<ChatSession | null> {
     if (!userId || !sessionId) return null;
-    
+
     try {
-      return await this.safeStorageOperation(() => {
-        const sessions = this.getChatSessionsSync(userId);
-        const session = sessions.find(s => s.id === sessionId);
-        return session || null;
-      });
+      const { data, error } = await supabase
+        .from('chat_sessions')
+        .select('*')
+        .eq('id', sessionId)
+        .eq('user_id', userId)
+        .single();
+
+      if (error || !data) return null;
+
+      const { data: messages } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('session_id', sessionId);
+
+      return {
+        id: data.id,
+        userId: data.user_id,
+        title: data.title,
+        summary: data.summary,
+        messages: (messages || []).map(msg => {
+          try {
+            const parsed = JSON.parse(msg.content);
+            return {
+              ...parsed,
+              timestamp: new Date(msg.created_at)
+            };
+          } catch {
+            return {
+              id: Math.random(),
+              text: msg.content,
+              sender: msg.role === 'assistant' ? 'ai' : 'user',
+              timestamp: new Date(msg.created_at)
+            };
+          }
+        }),
+        createdAt: new Date(data.created_at),
+        updatedAt: new Date(data.updated_at)
+      };
     } catch (error) {
       console.error('Error loading chat session:', error);
       return null;
@@ -135,14 +217,15 @@ class StorageService {
 
   async deleteChatSession(sessionId: string, userId: string): Promise<void> {
     if (!userId || !sessionId) return;
-    
+
     try {
-      await this.safeStorageOperation(() => {
-        const key = this.getKey('chat_sessions', userId);
-        const existingSessions = this.getChatSessionsSync(userId);
-        const filteredSessions = existingSessions.filter(s => s.id !== sessionId);
-        localStorage.setItem(key, JSON.stringify(filteredSessions));
-      });
+      const { error } = await supabase
+        .from('chat_sessions')
+        .delete()
+        .eq('id', sessionId)
+        .eq('user_id', userId);
+
+      if (error) throw error;
     } catch (error) {
       console.error('Error deleting chat session:', error);
       throw new Error('Failed to delete chat session');
@@ -152,8 +235,7 @@ class StorageService {
   // User Profiles
   saveUserProfile(profile: UserProfile): void {
     try {
-    const key = this.getKey('user_profile', profile.id);
-    localStorage.setItem(key, JSON.stringify(profile));
+      localStorage.setItem(`user_profile_${profile.id}`, JSON.stringify(profile));
     } catch (error) {
       console.error('Error saving user profile:', error);
     }
@@ -161,10 +243,8 @@ class StorageService {
 
   getUserProfile(userId: string): UserProfile | null {
     try {
-    const key = this.getKey('user_profile', userId);
-    const data = localStorage.getItem(key);
-    if (!data) return null;
-    
+      const data = localStorage.getItem(`user_profile_${userId}`);
+      if (!data) return null;
       return JSON.parse(data);
     } catch (error) {
       console.error('Error loading user profile:', error);
@@ -173,30 +253,66 @@ class StorageService {
   }
 
   // Medical History
-  saveMedicalHistory(userId: string, history: string): void {
+  async saveMedicalHistory(
+    userId: string,
+    data: {
+      allergies?: string;
+      medications?: string;
+      pastConditions?: string;
+      vaccinations?: string;
+    }
+  ): Promise<void> {
+    if (!userId) {
+      throw new Error('userId is required');
+    }
+
     try {
-    const key = this.getKey('medical_history', userId);
-    localStorage.setItem(key, history);
+      const { error } = await supabase
+        .from('medical_history')
+        .upsert({
+          user_id: userId,
+          allergies: data.allergies,
+          medications: data.medications,
+          past_conditions: data.pastConditions,
+          vaccinations: data.vaccinations,
+          updated_at: new Date()
+        });
+
+      if (error) throw error;
     } catch (error) {
       console.error('Error saving medical history:', error);
+      throw new Error('Failed to save medical history');
     }
   }
 
-  getMedicalHistory(userId: string): string {
+  async getMedicalHistory(userId: string): Promise<any | null> {
+    if (!userId) return null;
+
     try {
-    const key = this.getKey('medical_history', userId);
-    return localStorage.getItem(key) || '';
+      const { data, error } = await supabase
+        .from('medical_history')
+        .select('*')
+        .eq('user_id', userId)
+        .single();
+
+      if (error || !data) return null;
+
+      return {
+        allergies: data.allergies,
+        medications: data.medications,
+        pastConditions: data.past_conditions,
+        vaccinations: data.vaccinations
+      };
     } catch (error) {
       console.error('Error loading medical history:', error);
-      return '';
+      return null;
     }
   }
 
   // App Settings
   saveSettings(userId: string, settings: any): void {
     try {
-    const key = this.getKey('app_settings', userId);
-    localStorage.setItem(key, JSON.stringify(settings));
+      localStorage.setItem(`app_settings_${userId}`, JSON.stringify(settings));
     } catch (error) {
       console.error('Error saving settings:', error);
     }
@@ -204,10 +320,8 @@ class StorageService {
 
   getSettings(userId: string): any {
     try {
-    const key = this.getKey('app_settings', userId);
-    const data = localStorage.getItem(key);
-    if (!data) return {};
-    
+      const data = localStorage.getItem(`app_settings_${userId}`);
+      if (!data) return {};
       return JSON.parse(data);
     } catch (error) {
       console.error('Error loading settings:', error);
@@ -216,27 +330,45 @@ class StorageService {
   }
 
   // Clear all data for a user
-  clearUserData(userId: string): void {
+  async clearUserData(userId: string): Promise<void> {
     try {
-    const keys = [
-        this.getKey('chat_sessions', userId),
-      this.getKey('user_profile', userId),
-      this.getKey('medical_history', userId),
-      this.getKey('app_settings', userId),
-      this.getKey('onboarding_completed', userId)
-    ];
-    
-    keys.forEach(key => localStorage.removeItem(key));
+      // Delete all user's sessions (this will cascade delete messages)
+      const { error } = await supabase
+        .from('chat_sessions')
+        .delete()
+        .eq('user_id', userId);
+
+      if (error) throw error;
+
+      // Delete API keys
+      const { error: keyError } = await supabase
+        .from('api_keys')
+        .delete()
+        .eq('user_id', userId);
+
+      if (keyError) throw keyError;
+
+      // Delete medical history
+      const { error: historyError } = await supabase
+        .from('medical_history')
+        .delete()
+        .eq('user_id', userId);
+
+      if (historyError) throw historyError;
+
+      // Clear local preferences
+      localStorage.removeItem(`app_settings_${userId}`);
+      localStorage.removeItem(`user_profile_${userId}`);
     } catch (error) {
-      console.error('Error clearing user data:', error);
+      console.error('Error clearing storage:', error);
+      throw new Error('Failed to clear storage');
     }
   }
 
   // Onboarding state management
   saveOnboardingCompleted(userId: string): void {
     try {
-      const key = this.getKey('onboarding_completed', userId);
-      localStorage.setItem(key, 'true');
+      localStorage.setItem(`onboarding_completed_${userId}`, 'true');
     } catch (error) {
       console.error('Error saving onboarding state:', error);
     }
@@ -244,8 +376,7 @@ class StorageService {
 
   isOnboardingCompleted(userId: string): boolean {
     try {
-      const key = this.getKey('onboarding_completed', userId);
-      const completed = localStorage.getItem(key);
+      const completed = localStorage.getItem(`onboarding_completed_${userId}`);
       return completed === 'true';
     } catch (error) {
       console.error('Error checking onboarding state:', error);
@@ -253,34 +384,93 @@ class StorageService {
     }
   }
 
-  // API Key Management
-  saveApiKey(keyName: string, apiKey: string): void {
+  // API Key Management - Supabase async methods
+  async saveApiKeySupabase(userId: string, provider: string, key: string): Promise<void> {
+    if (!userId || !provider || !key) {
+      throw new Error('userId, provider, and key are required');
+    }
+
     try {
-      const key = `api_key_${keyName}`;
-      localStorage.setItem(key, apiKey);
-      console.log(`✅ API key saved for ${keyName}`);
+      const { error } = await supabase
+        .from('api_keys')
+        .insert({
+          user_id: userId,
+          provider,
+          key_value: key
+        });
+
+      if (error) throw error;
     } catch (error) {
-      console.error(`Error saving API key for ${keyName}:`, error);
+      console.error('Error saving API key:', error);
+      throw new Error('Failed to save API key');
     }
   }
 
-  getApiKey(keyName: string): string | null {
+  async getApiKeySupabase(userId: string, provider: string): Promise<string | null> {
+    if (!userId || !provider) return null;
+
     try {
-      const key = `api_key_${keyName}`;
-      return localStorage.getItem(key);
+      const { data, error } = await supabase
+        .from('api_keys')
+        .select('key_value')
+        .eq('user_id', userId)
+        .eq('provider', provider)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (error || !data) return null;
+      return data.key_value;
     } catch (error) {
-      console.error(`Error loading API key for ${keyName}:`, error);
+      console.error('Error loading API key:', error);
       return null;
     }
   }
 
-  deleteApiKey(keyName: string): void {
+  async deleteApiKeySupabase(userId: string, provider: string): Promise<void> {
+    if (!userId || !provider) return;
+
     try {
-      const key = `api_key_${keyName}`;
-      localStorage.removeItem(key);
-      console.log(`✅ API key deleted for ${keyName}`);
+      const { error } = await supabase
+        .from('api_keys')
+        .delete()
+        .eq('user_id', userId)
+        .eq('provider', provider);
+
+      if (error) throw error;
     } catch (error) {
-      console.error(`Error deleting API key for ${keyName}:`, error);
+      console.error('Error deleting API key:', error);
+      throw new Error('Failed to delete API key');
+    }
+  }
+
+  // API Key Management - localStorage synchronous methods for React components
+  saveApiKey(provider: string, key: string): void {
+    try {
+      localStorage.setItem(`api_key_${provider}`, key);
+      console.log(`✅ API key saved for ${provider}`);
+    } catch (error) {
+      console.error(`Error saving API key for ${provider}:`, error);
+      throw new Error(`Failed to save API key for ${provider}`);
+    }
+  }
+
+  getApiKey(provider: string): string | null {
+    try {
+      return localStorage.getItem(`api_key_${provider}`) || null;
+    } catch (error) {
+      console.error(`Error loading API key for ${provider}:`, error);
+      return null;
+    }
+  }
+
+  deleteApiKey(provider: string): void {
+    try {
+      localStorage.removeItem(`api_key_${provider}`);
+      console.log(`✅ API key deleted for ${provider}`);
+    } catch (error) {
+      console.error(`Error deleting API key for ${provider}:`, error);
+      throw new Error(`Failed to delete API key for ${provider}`);
     }
   }
 

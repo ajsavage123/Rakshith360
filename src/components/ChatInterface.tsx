@@ -5,6 +5,7 @@ import ChatArea from "@/components/ChatArea";
 import { Menu, LogOut, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { storageService, ChatSession } from "@/lib/storage";
+import { generateUUID } from "@/lib/uuid";
 import rakshithShield from "@/assets/rakshith360-shield.svg";
 import FlashMode from "./FlashMode";
 
@@ -28,8 +29,9 @@ const ChatInterface = () => {
         } else {
           // No sessions, create a new one automatically
           const newSession: ChatSession = {
-            id: Date.now().toString(),
+            id: generateUUID(),
             userId: user.uid,
+            title: "New Consultation",
             messages: [
               {
                 id: 1,
@@ -55,8 +57,9 @@ const ChatInterface = () => {
   const handleNewChat = async () => {
     if (!user) return;
     const newSession: ChatSession = {
-      id: Date.now().toString(),
+      id: generateUUID(),
       userId: user.uid,
+      title: "New Consultation",
       messages: [
         {
           id: 1,

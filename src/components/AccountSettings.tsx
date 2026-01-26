@@ -20,14 +20,17 @@ const AccountSettings: React.FC<AccountSettingsProps> = ({ onClose }) => {
   const [geminiKey, setGeminiKey] = useState('');
   const [deepseekKey, setDeepseekKey] = useState('');
   const [openaiKey, setOpenaiKey] = useState('');
+  const [openrouterKey, setOpenrouterKey] = useState('');
   const [geoapifyKey, setGeoapifyKey] = useState('');
   const [showGeminiKey, setShowGeminiKey] = useState(false);
   const [showDeepseekKey, setShowDeepseekKey] = useState(false);
   const [showOpenaiKey, setShowOpenaiKey] = useState(false);
+  const [showOpenrouterKey, setShowOpenrouterKey] = useState(false);
   const [showGeoapifyKey, setShowGeoapifyKey] = useState(false);
   const [geminiStatus, setGeminiStatus] = useState<'idle' | 'saving' | 'detecting' | 'success' | 'error'>('idle');
   const [deepseekStatus, setDeepseekStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [openaiStatus, setOpenaiStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
+  const [openrouterStatus, setOpenrouterStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [geoapifyStatus, setGeoapifyStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [detectProgress, setDetectProgress] = useState<{ current: number; total: number; modelName: string } | null>(null);
@@ -37,17 +40,20 @@ const AccountSettings: React.FC<AccountSettingsProps> = ({ onClose }) => {
     const savedGemini = storageService.getApiKey('gemini') || '';
     const savedDeepseek = storageService.getApiKey('deepseek') || '';
     const savedOpenai = storageService.getApiKey('openai') || '';
+    const savedOpenrouter = storageService.getApiKey('openrouter') || '';
     const savedGeoapify = storageService.getApiKey('geoapify') || '';
     
     // Also check environment variables as fallback
     const envGemini = import.meta.env.VITE_GEMINI_API_KEY || '';
     const envDeepseek = import.meta.env.VITE_DEEPSEEK_API_KEY || '';
     const envOpenai = import.meta.env.VITE_OPENAI_API_KEY || '';
+    const envOpenrouter = import.meta.env.VITE_OPENROUTER_API_KEY || '';
     const envGeoapify = import.meta.env.VITE_GEOAPIFY_API_KEY || '';
     
     setGeminiKey(savedGemini || envGemini);
     setDeepseekKey(savedDeepseek || envDeepseek);
     setOpenaiKey(savedOpenai || envOpenai);
+    setOpenrouterKey(savedOpenrouter || envOpenrouter);
     setGeoapifyKey(savedGeoapify || envGeoapify);
   }, []);
 
@@ -217,6 +223,41 @@ const AccountSettings: React.FC<AccountSettingsProps> = ({ onClose }) => {
       storageService.deleteApiKey('openai');
       setOpenaiKey('');
       setMessage({ type: 'success', text: 'OpenAI API key deleted' });
+      setTimeout(() => setMessage(null), 3000);
+    }
+  };
+
+  const handleSaveOpenrouterKey = async () => {
+    if (!openrouterKey.trim()) {
+      setMessage({ type: 'error', text: 'OpenRouter API key cannot be empty' });
+      return;
+    }
+
+    setOpenrouterStatus('saving');
+    try {
+      storageService.saveApiKey('openrouter', openrouterKey.trim());
+      setOpenrouterStatus('success');
+      setMessage({ type: 'success', text: 'OpenRouter API key saved successfully!' });
+      window.dispatchEvent(new Event('apiKeyUpdated'));
+      setTimeout(() => {
+        setMessage(null);
+        setOpenrouterStatus('idle');
+      }, 3000);
+    } catch (error) {
+      setOpenrouterStatus('error');
+      setMessage({ type: 'error', text: 'Failed to save OpenRouter API key' });
+      setTimeout(() => {
+        setMessage(null);
+        setOpenrouterStatus('idle');
+      }, 3000);
+    }
+  };
+
+  const handleDeleteOpenrouterKey = () => {
+    if (confirm('Are you sure you want to delete the OpenRouter API key?')) {
+      storageService.deleteApiKey('openrouter');
+      setOpenrouterKey('');
+      setMessage({ type: 'success', text: 'OpenRouter API key deleted' });
       setTimeout(() => setMessage(null), 3000);
     }
   };
@@ -419,7 +460,7 @@ const AccountSettings: React.FC<AccountSettingsProps> = ({ onClose }) => {
                       </div>
                     )}
                   </div>
-                  {geminiKey && (
+                  {geminiKey && typeof geminiKey === 'string' && (
                     <p className="text-xs text-gray-500 dark:text-gray-400 break-all">
                       Key: {geminiKey.substring(0, 10)}...{geminiKey.substring(geminiKey.length - 4)}
                     </p>
@@ -497,7 +538,7 @@ const AccountSettings: React.FC<AccountSettingsProps> = ({ onClose }) => {
                       )}
                     </div>
                   </div>
-                  {deepseekKey && (
+                  {deepseekKey && typeof deepseekKey === 'string' && (
                     <p className="text-xs text-gray-500 dark:text-gray-400 break-all">
                       Key: {deepseekKey.substring(0, 10)}...{deepseekKey.substring(deepseekKey.length - 4)}
                     </p>
@@ -575,11 +616,92 @@ const AccountSettings: React.FC<AccountSettingsProps> = ({ onClose }) => {
                       )}
                     </div>
                   </div>
-                  {openaiKey && (
+                  {openaiKey && typeof openaiKey === 'string' && (
                     <p className="text-xs text-gray-500 dark:text-gray-400 break-all">
                       Key: {openaiKey.substring(0, 10)}...{openaiKey.substring(openaiKey.length - 4)}
                     </p>
                   )}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* OpenRouter API Key (FREE) */}
+            <Card className="border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/10">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Key className="w-5 h-5 text-green-600" />
+                  OpenRouter API Key <span className="text-xs bg-green-600 text-white px-2 py-1 rounded ml-2">FREE</span>
+                </CardTitle>
+                <CardDescription className="text-xs sm:text-sm">
+                  Free access to Mistral, LLaMA, and other open-source models. Get your free API key from{' '}
+                  <a
+                    href="https://openrouter.ai"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-green-600 dark:text-green-400 hover:underline inline-flex items-center gap-1 break-all"
+                  >
+                    OpenRouter
+                    <ExternalLink className="w-3 h-3 flex-shrink-0" />
+                  </a>
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="openrouter-key" className="text-sm sm:text-base">API Key</Label>
+                  <div className="space-y-2">
+                    <div className="relative w-full">
+                      <Input
+                        id="openrouter-key"
+                        type={showOpenrouterKey ? 'text' : 'password'}
+                        value={openrouterKey}
+                        onChange={(e) => setOpenrouterKey(e.target.value)}
+                        placeholder="Enter your OpenRouter API key"
+                        className="pr-10 w-full text-sm sm:text-base"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="absolute right-0 top-0 h-full px-2 sm:px-3 hover:bg-transparent"
+                        onClick={() => setShowOpenrouterKey(!showOpenrouterKey)}
+                      >
+                        {showOpenrouterKey ? (
+                          <EyeOff className="w-4 h-4 sm:w-5 sm:h-5 text-gray-500" />
+                        ) : (
+                          <Eye className="w-4 h-4 sm:w-5 sm:h-5 text-gray-500" />
+                        )}
+                      </Button>
+                    </div>
+                    <div className="flex gap-2 flex-wrap">
+                      <Button
+                        onClick={handleSaveOpenrouterKey}
+                        disabled={openrouterStatus === 'saving'}
+                        className="bg-green-600 hover:bg-green-700 text-white flex-1 min-w-[100px] text-sm sm:text-base"
+                      >
+                        {openrouterStatus === 'saving' ? 'Saving...' : openrouterStatus === 'success' ? (
+                          <CheckCircle2 className="w-4 h-4" />
+                        ) : 'Save'}
+                      </Button>
+                      {openrouterKey && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleDeleteOpenrouterKey}
+                          className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 px-3 sm:px-4"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                  {openrouterKey && typeof openrouterKey === 'string' && (
+                    <p className="text-xs text-gray-500 dark:text-gray-400 break-all">
+                      Key: {openrouterKey.substring(0, 10)}...{openrouterKey.substring(openrouterKey.length - 4)}
+                    </p>
+                  )}
+                  <p className="text-xs text-green-700 dark:text-green-300 mt-2">
+                    ✓ Free access to Mistral 7B, LLaMA 2, MythoMax and more. Perfect for testing.
+                  </p>
                 </div>
               </CardContent>
             </Card>
@@ -653,7 +775,7 @@ const AccountSettings: React.FC<AccountSettingsProps> = ({ onClose }) => {
                       )}
                     </div>
                   </div>
-                  {geoapifyKey && (
+                  {geoapifyKey && typeof geoapifyKey === 'string' && (
                     <p className="text-xs text-gray-500 dark:text-gray-400 break-all">
                       Key: {geoapifyKey.substring(0, 10)}...{geoapifyKey.substring(geoapifyKey.length - 4)}
                     </p>

@@ -7,6 +7,7 @@ import OnboardingFlow from "@/components/OnboardingFlow";
 import { Loader2, LogOut, MessageCircle, Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { storageService, ChatSession } from "@/lib/storage";
+import { generateUUID } from "@/lib/uuid";
 import rakshithShield from "@/assets/rakshith360-shield.svg";
 
 const Index = () => {
@@ -97,8 +98,9 @@ const Index = () => {
     
     try {
       const newSession: ChatSession = {
-        id: Date.now().toString(),
+        id: generateUUID(),
         userId: user.uid,
+        title: "New Consultation",
         messages: [
           {
             id: 1,

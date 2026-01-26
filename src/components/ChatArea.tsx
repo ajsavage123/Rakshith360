@@ -78,23 +78,22 @@ const ChatArea = ({ sessionId, onUpdateSession }: ChatAreaProps) => {
   const [summaryError, setSummaryError] = useState<string | null>(null);
 
   // Function to load selected AI model and check API key
-  const loadAIModel = useCallback(() => {
+  const loadAIModel = useCallback(async () => {
     const model = getSelectedModel();
     setSelectedAIModel(model);
-    const apiKey = getApiKey(model);
+    
+    // Get API key from localStorage first (for backward compatibility)
+    let apiKey = localStorage.getItem(`api_key_${model}`);
     
     console.log('🤖 Loading AI model...');
     console.log('   Selected model:', AI_MODELS[model].name);
     console.log('   API key present:', !!apiKey);
-    console.log('   Key preview:', apiKey ? apiKey.substring(0, 10) + '...' : 'N/A');
     
-    if (apiKey) {
+    if (apiKey && typeof apiKey === 'string') {
       setShowApiKeyConfig(false);
       console.log('✅ API key loaded successfully');
-    } else {
-      console.warn(`⚠️ ${AI_MODELS[model].name} API key not found. Please configure in Account Settings.`);
-      setShowApiKeyConfig(true);
     }
+    // Don't show popup on initial load - only when user tries to send message
   }, []);
 
   // Load AI model and API key on component mount
@@ -274,9 +273,10 @@ const ChatArea = ({ sessionId, onUpdateSession }: ChatAreaProps) => {
         try {
           const updatedSession: ChatSession = {
             id: sessionId,
-            userId: user.uid, // Use user.uid
+            userId: user.uid,
+            title: "Medical Consultation",
             messages,
-            createdAt: messages[0]?.timestamp || new Date(), // Use first message timestamp or current time
+            createdAt: messages[0]?.timestamp || new Date(),
             updatedAt: new Date(),
           };
           await storageService.saveChatSession(updatedSession);
@@ -304,7 +304,7 @@ const ChatArea = ({ sessionId, onUpdateSession }: ChatAreaProps) => {
     const apiKey = getApiKey(selectedAIModel);
     if (!apiKey) {
       setShowApiKeyConfig(true);
-      return `Please configure your ${AI_MODELS[selectedAIModel].name} API key in Account Settings.`;
+      return `⚠️ Missing API key for ${AI_MODELS[selectedAIModel].name}. Please configure your API key in Account Settings to continue.`;
     }
     
     try {
@@ -557,14 +557,17 @@ Question: [Your specific, targeted question here]
     if (conversationStep < conversationFlow.length) {
       setTimeout(() => {
         const staticQ = conversationFlow[conversationStep];
-        setMessages(prev => [...prev, {
-          id: prev.length + 1,
-          sender: "ai",
-          timestamp: new Date(),
-          isInteractive: true,
-          question: staticQ.question,
-          options: toInteractiveOptions(staticQ.options)
-        }]);
+        setMessages(prev => {
+          const newId = prev.length + 1;
+          return [...prev, {
+            id: newId,
+            sender: "ai",
+            timestamp: new Date(),
+            isInteractive: true,
+            question: staticQ.question,
+            options: toInteractiveOptions(staticQ.options, newId)
+          }];
+        });
         setCurrentlyShowingInteractive(true);
         setConversationStep(prev => prev + 1);
         setIsTyping(false);
@@ -576,14 +579,17 @@ Question: [Your specific, targeted question here]
     const aiQuestion = await getNextAIQuestion(newHistory);
     setIsTyping(false);
     if (aiQuestion) {
-      setMessages(prev => [...prev, {
-        id: prev.length + 1,
-        sender: "ai",
-        timestamp: new Date(),
-        isInteractive: true,
-        question: aiQuestion.question,
-        options: toInteractiveOptions(aiQuestion.options)
-      }]);
+      setMessages(prev => {
+        const newId = prev.length + 1;
+        return [...prev, {
+          id: newId,
+          sender: "ai",
+          timestamp: new Date(),
+          isInteractive: true,
+          question: aiQuestion.question,
+          options: toInteractiveOptions(aiQuestion.options, newId)
+        }];
+      });
       setCurrentlyShowingInteractive(true);
     }
   };
@@ -713,17 +719,20 @@ Question: [Your specific, targeted question here]
         if (nextStep < conversationFlow.length && nextQuestion && nextQuestionId && !askedQuestionIds.has(nextQuestionId)) {
           setConversationStep(nextStep);
           setTimeout(() => {
-            setMessages(prev => [
-              ...prev,
-              {
-                id: prev.length + 1,
-                question: nextQuestion.question,
-                sender: "ai" as const,
-                timestamp: new Date(),
-                isInteractive: true,
-                options: toInteractiveOptions(nextQuestion.options)
-              }
-            ]);
+            setMessages(prev => {
+              const newId = prev.length + 1;
+              return [
+                ...prev,
+                {
+                  id: newId,
+                  question: nextQuestion.question,
+                  sender: "ai" as const,
+                  timestamp: new Date(),
+                  isInteractive: true,
+                  options: toInteractiveOptions(nextQuestion.options, newId)
+                }
+              ];
+            });
             setCurrentlyShowingInteractive(true);
           }, 500);
         } else {
@@ -753,17 +762,20 @@ Question: [Your specific, targeted question here]
               if (!askedQuestionIds.has(dynamicQuestionId) && !isSimilarQuestion(dynamicQuestion.question)) {
                 console.log('✅ Question is new, adding to chat...');
                 setTimeout(() => {
-                  setMessages(prev => [
-                    ...prev,
-                    {
-                      id: prev.length + 1,
-                      question: dynamicQuestion.question,
-                      sender: "ai" as const,
-                      timestamp: new Date(),
-                      isInteractive: true,
-                      options: toInteractiveOptions(dynamicQuestion.options)
-                    }
-                  ]);
+                  setMessages(prev => {
+                    const newId = prev.length + 1;
+                    return [
+                      ...prev,
+                      {
+                        id: newId,
+                        question: dynamicQuestion.question,
+                        sender: "ai" as const,
+                        timestamp: new Date(),
+                        isInteractive: true,
+                        options: toInteractiveOptions(dynamicQuestion.options, newId)
+                      }
+                    ];
+                  });
                   setCurrentlyShowingInteractive(true);
                   setDynamicQuestions([dynamicQuestion]);
                   setCurrentDynamicIndex(0);
@@ -802,17 +814,20 @@ Question: [Your specific, targeted question here]
             // Check if this dynamic question was already asked using the Set and enhanced similarity check
             if (!askedQuestionIds.has(nextDynamicQuestionId) && !isSimilarQuestion(nextDynamicQuestion.question)) {
               setTimeout(() => {
-                setMessages(prev => [
-                  ...prev,
-                  {
-                    id: prev.length + 1,
-                    question: nextDynamicQuestion.question,
-                    sender: "ai" as const,
-                    timestamp: new Date(),
-                    isInteractive: true,
-                    options: toInteractiveOptions(nextDynamicQuestion.options)
-                  }
-                ]);
+                setMessages(prev => {
+                  const newId = prev.length + 1;
+                  return [
+                    ...prev,
+                    {
+                      id: newId,
+                      question: nextDynamicQuestion.question,
+                      sender: "ai" as const,
+                      timestamp: new Date(),
+                      isInteractive: true,
+                      options: toInteractiveOptions(nextDynamicQuestion.options, newId)
+                    }
+                  ];
+                });
                 setCurrentlyShowingInteractive(true);
                 setDynamicQuestions(prev => [...prev, nextDynamicQuestion]);
                 setCurrentDynamicIndex(prev => prev + 1);
@@ -1115,7 +1130,7 @@ Please provide a comprehensive medical assessment based on the above information
           timestamp: new Date(),
           isInteractive: true,
           question: nextDynamicQuestion.question,
-          options: toInteractiveOptions(nextDynamicQuestion.options)
+          options: toInteractiveOptions(nextDynamicQuestion.options, Date.now())
         };
         
         setMessages(prev => [...prev, interactiveMessage]);
@@ -1166,13 +1181,14 @@ Please provide a comprehensive medical assessment based on the above information
       // Show next static question
       setTimeout(() => {
         const nextQ = conversationFlow[nextStep];
+        const newId = messages.length + 2;
         const staticQuestion: Message = {
-          id: messages.length + 2,
+          id: newId,
           sender: "ai",
           timestamp: new Date(),
           isInteractive: true,
           question: nextQ.question,
-          options: toInteractiveOptions(nextQ.options)
+          options: toInteractiveOptions(nextQ.options, newId)
         };
         setMessages(prev => [...prev, staticQuestion]);
         setCurrentlyShowingInteractive(true);
@@ -1199,7 +1215,7 @@ Please provide a comprehensive medical assessment based on the above information
             timestamp: new Date(),
             isInteractive: true,
             question: firstDynamicQuestion.question,
-            options: toInteractiveOptions(firstDynamicQuestion.options)
+            options: toInteractiveOptions(firstDynamicQuestion.options, Date.now())
           };
           
           setMessages(prev => [...prev, interactiveMessage]);
@@ -1394,9 +1410,13 @@ Please provide a comprehensive medical assessment based on the above information
     return foundSpecialties;
   };
 
-  function toInteractiveOptions(options: unknown): InteractiveOption[] {
+  function toInteractiveOptions(options: unknown, messageId?: number): InteractiveOption[] {
     if (Array.isArray(options) && typeof options[0] === 'string') {
-      return (options as string[]).map((opt, idx) => ({ id: String(idx + 1), label: opt, value: opt.toLowerCase().replace(/\s+/g, '_') }));
+      return (options as string[]).map((opt, idx) => ({ 
+        id: messageId ? `${messageId}-opt-${idx}` : String(idx + 1), 
+        label: opt, 
+        value: opt.toLowerCase().replace(/\s+/g, '_') 
+      }));
     }
     return options as InteractiveOption[];
   }
@@ -1490,7 +1510,7 @@ Please provide a comprehensive medical assessment based on the above information
                       question={message.question && message.question.length > 120 ? message.question.slice(0, 117) + '...' : message.question}
                       options={
                         isStringArray(message.options)
-                          ? (message.options as string[]).map((opt, idx) => ({ id: String(idx+1), label: opt, value: opt.toLowerCase().replace(/\s+/g, '_') }))
+                          ? (message.options as string[]).map((opt, idx) => ({ id: `${message.id}-opt-${idx}`, label: opt, value: opt.toLowerCase().replace(/\s+/g, '_') }))
                           : (Array.isArray(message.options) && message.options.length > 0 && typeof message.options[0] === 'object'
                             ? message.options as InteractiveOption[]
                             : undefined)
@@ -1527,7 +1547,7 @@ Please provide a comprehensive medical assessment based on the above information
                           .map(line => line.trim())
                           .filter(line => line.length > 0)
                           .map((line, idx) => (
-                            <div key={idx} className="flex items-start">
+                            <div key={`${message.id}-line-${idx}`} className="flex items-start">
                               <span className="mr-2 text-lg text-blue-400" style={{lineHeight: '1'}}>&bull;</span>
                               <span>{line}</span>
                             </div>

@@ -271,12 +271,29 @@ class GeoapifyService {
         }
       }
 
-      // Fallback to Nominatim
-      const url = `https://nominatim.openstreetmap.org/reverse?lat=${location.lat}&lon=${location.lng}&format=json`;
-      const data = await this.makeRequest(url);
-      
-      if (data.address) {
-        return data.address.city || data.address.town || data.address.village || data.address.county || 'Unknown location';
+      // Fallback to Nominatim with proper headers and CORS handling
+      try {
+        const url = `https://nominatim.openstreetmap.org/reverse?lat=${location.lat}&lon=${location.lng}&format=json`;
+        const response = await fetch(url, {
+          method: 'GET',
+          headers: {
+            'User-Agent': 'Medical-Assistant-App (https://github.com/ajsavage123/Rakshith360)'
+          }
+        });
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        if (data.address) {
+          return data.address.city || data.address.town || data.address.village || data.address.county || 'Unknown location';
+        }
+      } catch (corsError) {
+        console.warn('Nominatim reverse geocoding blocked by CORS, using fallback location:', corsError);
+        // Return a generic location based on coordinates when CORS blocks the request
+        return `Location (${location.lat.toFixed(2)}°, ${location.lng.toFixed(2)}°)`;
       }
       
       return 'Unknown location';
