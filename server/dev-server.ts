@@ -3,7 +3,7 @@ import type { Request, Response } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
-import { callGeminiProvider } from '../api/utils/gemini.ts';
+import { callGeminiProvider } from '../api/chat.ts';
 
 // Load environment variables from .env
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
