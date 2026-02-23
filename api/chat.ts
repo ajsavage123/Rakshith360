@@ -26,24 +26,38 @@ export const callGeminiProvider = async (
         }
     );
 
-    if (response.status === 429) {
-        console.warn(`⚠️ 429 Too Many Requests received on key index ${currentKeyIndex}.`);
+    let isQuotaError = response.status === 429;
+    let errorData = null;
+
+    if (!response.ok) {
+        errorData = await response.json().catch(() => ({}));
+        const errorMessage = errorData.error?.message?.toLowerCase() || '';
+        // Catch Google's specific hard-limit quota errors which often return as 400 or 403
+        if (
+            response.status === 403 ||
+            errorMessage.includes('quota exceeded') ||
+            errorMessage.includes('rate limit') ||
+            errorMessage.includes('too many requests')
+        ) {
+            isQuotaError = true;
+        }
+    }
+
+    if (isQuotaError) {
+        console.warn(`⚠️ Quota/Rate Limit hit on key index ${currentKeyIndex}. Status: ${response.status}`);
 
         if (currentKeyIndex < apiKeys.length - 1) {
             console.log(`🔄 Rotating to backup API key index ${currentKeyIndex + 1}...`);
             return callGeminiProvider(message, apiKeys, currentKeyIndex + 1);
         } else {
-            // If we are on the last key, just wait 2 seconds and retry one last time
-            console.log(`⏳ No more backup keys. Delaying 2 seconds and retrying current key...`);
-            await new Promise(resolve => setTimeout(resolve, 2000));
-            // Retry the last key by bypassing the index length check using a trick (calling the endpoint directly just once more)
-            // To keep it simple, we just fail gracefully up to the client after all keys are exhausted.
+            console.log(`⏳ No more backup keys available. All keys are depleted.`);
+            if (!errorData) errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData?.error?.message || `All ${apiKeys.length} API keys exceeded their quotas. Please try again later.`);
         }
     }
 
     if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error?.message || `API error: ${response.status}`);
+        throw new Error(errorData?.error?.message || `API error: ${response.status}`);
     }
 
     const data = await response.json();
