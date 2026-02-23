@@ -3,7 +3,7 @@ import type { Request, Response } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
-import { callGeminiProvider } from '../api/chat.ts';
+import { callGeminiProvider, getAvailableApiKeys } from '../api/chat.ts';
 
 // Load environment variables from .env
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
@@ -22,10 +22,9 @@ app.post('/api/chat', async (req: Request, res: Response) => {
         return res.status(400).json({ error: 'Message is required' });
     }
 
-    // Use VITE_GEMINI_API_KEY from .env locally
-    const apiKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+    const apiKeys = getAvailableApiKeys();
 
-    if (!apiKey) {
+    if (apiKeys.length === 0) {
         console.error('CRITICAL ERROR: No Gemini API Key found in .env file.');
         return res.status(500).json({
             error: 'Server configuration error: VITE_GEMINI_API_KEY or GEMINI_API_KEY is missing'
@@ -33,7 +32,7 @@ app.post('/api/chat', async (req: Request, res: Response) => {
     }
 
     try {
-        const reply = await callGeminiProvider(message, apiKey);
+        const reply = await callGeminiProvider(message, apiKeys);
         return res.status(200).json({ reply });
     } catch (error: any) {
         console.error('Local Dev Server Gemini API Error:', error);
