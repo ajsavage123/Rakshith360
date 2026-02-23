@@ -52,39 +52,22 @@ export const AI_MODELS: Record<AIModel, AIModelConfig> = {
   }
 };
 
-// Get API key for a provider — reads ONLY from environment variables (backend-safe)
+// Get API key for a provider
 export const getApiKey = (provider: AIModel): string | null => {
   const config = AI_MODELS[provider];
   if (!config) return null;
 
-  // Only read from environment variables — never expose keys on the client
+  // Gemini is now securely managed by the backend (Vercel Serverless / Express proxy).
+  // The frontend no longer requires API keys in 'import.meta.env', so we return a bypass string.
   if (provider === 'gemini') {
-    const keys = getGeminiApiKeys();
-    return keys.length > 0 ? keys[0] : null;
+    return 'backend-managed-key';
   }
 
   const envKey = import.meta.env[`VITE_${config.apiKeyName.toUpperCase()}_API_KEY`];
   return envKey || null;
 };
 
-// Get all available Gemini API keys from environment variables
-export const getGeminiApiKeys = (): string[] => {
-  const keys: string[] = [];
 
-  // Check the base key
-  const baseKey = import.meta.env.VITE_GEMINI_API_KEY;
-  if (baseKey && baseKey.trim() !== '') keys.push(baseKey);
-
-  // Check numbered keys (e.g., VITE_GEMINI_API_KEY_1, VITE_GEMINI_API_KEY_2, etc.)
-  for (let i = 1; i <= 10; i++) {
-    const numberedKey = import.meta.env[`VITE_GEMINI_API_KEY_${i}`];
-    if (numberedKey && numberedKey.trim() !== '' && !keys.includes(numberedKey)) {
-      keys.push(numberedKey);
-    }
-  }
-
-  return keys;
-};
 
 // Get selected model preference
 export const getSelectedModel = (): AIModel => {
