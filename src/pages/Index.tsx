@@ -56,7 +56,7 @@ const Index = () => {
       storageService.saveOnboardingCompleted(user.uid);
       setShowOnboarding(false);
       setCheckingOnboarding(false); // Prevent re-checking
-      
+
       // Automatically start a chat session and go to chat interface
       await handleStartChat();
     }
@@ -75,10 +75,10 @@ const Index = () => {
   // Load existing chat sessions only when needed
   const loadSessions = async () => {
     if (!user) return;
-    
+
     setLoadingSessions(true);
     setError(null);
-    
+
     try {
       const userSessions = await storageService.getChatSessions(user.uid);
       setSessions(userSessions);
@@ -93,9 +93,9 @@ const Index = () => {
   // Create a new chat session when user wants to chat
   const handleStartChat = async () => {
     if (!user) return;
-    
+
     setError(null);
-    
+
     try {
       const newSession: ChatSession = {
         id: generateUUID(),
@@ -112,7 +112,7 @@ const Index = () => {
         createdAt: new Date(),
         updatedAt: new Date()
       };
-      
+
       await storageService.saveChatSession(newSession);
       setSessions(prev => [newSession, ...prev]);
       setCurrentSessionId(newSession.id);
@@ -142,12 +142,12 @@ const Index = () => {
   // Handle session deletion
   const handleDeleteSession = async (sessionId: string) => {
     if (!user) return;
-    
+
     try {
       await storageService.deleteChatSession(sessionId, user.uid);
       const remainingSessions = sessions.filter(s => s.id !== sessionId);
       setSessions(remainingSessions);
-      
+
       // If the deleted session was the current one, switch to the most recent remaining session
       if (currentSessionId === sessionId) {
         if (remainingSessions.length > 0) {
@@ -202,7 +202,7 @@ const Index = () => {
       <div className="h-screen bg-gray-50 dark:bg-gray-900 flex transition-colors duration-300 overflow-hidden">
         {/* Mobile backdrop */}
         {sidebarOpen && (
-          <div 
+          <div
             className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden"
             onClick={() => setSidebarOpen(false)}
           />
@@ -243,7 +243,7 @@ const Index = () => {
                 RAKSHITH 360
               </span>
             </div>
-            
+
             <div className="flex items-center space-x-2 sm:space-x-3">
               <span className="text-xs sm:text-sm text-gray-600 dark:text-gray-300 hidden sm:block">
                 {user.email}
@@ -294,14 +294,14 @@ const Index = () => {
       <div className="text-center text-white">
         <h1 className="text-2xl font-bold mb-4">Welcome to Rakshith 360</h1>
         <p className="mb-2">User: {user.email}</p>
-        
+
         {/* Error Message */}
         {error && (
           <div className="mb-4 p-3 bg-red-900/20 border border-red-700 rounded text-red-300">
             {error}
           </div>
         )}
-        
+
         <div className="space-y-3">
           <Button
             onClick={handleStartChat}
@@ -310,12 +310,12 @@ const Index = () => {
           >
             {loadingSessions ? (
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-      ) : (
+            ) : (
               <MessageCircle className="w-4 h-4 mr-2" />
             )}
             {loadingSessions ? 'Loading...' : 'Start Medical Chat'}
           </Button>
-          
+
           <Button
             onClick={logout}
             variant="outline"

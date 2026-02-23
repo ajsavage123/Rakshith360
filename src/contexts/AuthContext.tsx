@@ -1,6 +1,14 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { supabase } from '../lib/supabaseClient';
-import type { User as SupabaseUser } from '@supabase/supabase-js';
+
+const USERS_KEY = 'rakshith360_users';
+const SESSION_KEY = 'rakshith360_session';
+
+interface StoredUser {
+  uid: string;
+  email: string;
+  displayName: string;
+  passwordHash: string; // simple base64 — NOT for production use
+}
 
 interface User {
   uid: string;
@@ -22,83 +30,65 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
+  if (!context) throw new Error('useAuth must be used within an AuthProvider');
   return context;
 };
+
+// Helpers
+const getUsers = (): StoredUser[] => {
+  try {
+    return JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+  } catch {
+    return [];
+  }
+};
+
+const saveUsers = (users: StoredUser[]) => {
+  localStorage.setItem(USERS_KEY, JSON.stringify(users));
+};
+
+const hashPassword = (password: string) => btoa(password); // simple obfuscation only
+const generateUid = () => `user_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 
 interface AuthProviderProps {
   children: ReactNode;
 }
-
-const convertSupabaseUser = (supabaseUser: SupabaseUser | null): User | null => {
-  if (!supabaseUser) return null;
-  return {
-    uid: supabaseUser.id,
-    email: supabaseUser.email || null,
-    displayName: supabaseUser.user_metadata?.name || supabaseUser.email?.split('@')[0] || null
-  };
-};
 
 export const AuthProvider = ({ children }: AuthProviderProps) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(false);
   const [initializing, setInitializing] = useState(true);
 
+  // Restore session on mount
   useEffect(() => {
-    // Check for existing session on app start
-    const checkSession = async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.user) {
-          setUser(convertSupabaseUser(session.user));
-        }
-      } catch (error) {
-        console.error('Error checking session:', error);
-      } finally {
-        setInitializing(false);
+    try {
+      const sessionData = localStorage.getItem(SESSION_KEY);
+      if (sessionData) {
+        const parsed: User = JSON.parse(sessionData);
+        setUser(parsed);
       }
-    };
-
-    checkSession();
-
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (session?.user) {
-        setUser(convertSupabaseUser(session.user));
-      } else {
-        setUser(null);
-      }
-    });
-
-    return () => {
-      subscription?.unsubscribe();
-    };
+    } catch {
+      // ignore corrupt session
+    } finally {
+      setInitializing(false);
+    }
   }, []);
 
   const login = async (email: string, password: string) => {
     setLoading(true);
     try {
-      if (!email || !password) {
-        throw new Error('Email and password are required');
-      }
+      if (!email || !password) throw new Error('Email and password are required');
 
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password
-      });
+      const users = getUsers();
+      const found = users.find(
+        (u) => u.email.toLowerCase() === email.toLowerCase() && u.passwordHash === hashPassword(password)
+      );
 
-      if (error) {
-        throw error;
-      }
+      if (!found) throw new Error('Invalid email or password');
 
-      if (data.user) {
-        setUser(convertSupabaseUser(data.user));
-      }
-    } catch (error) {
-      console.error('Login error:', error);
-      throw error;
+      const sessionUser: User = { uid: found.uid, email: found.email, displayName: found.displayName };
+      localStorage.setItem(SESSION_KEY, JSON.stringify(sessionUser));
+      setUser(sessionUser);
     } finally {
       setLoading(false);
     }
@@ -107,34 +97,25 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const register = async (email: string, password: string, name: string) => {
     setLoading(true);
     try {
-      if (!email || !password || !name) {
-        throw new Error('All fields are required');
-      }
+      if (!email || !password || !name) throw new Error('All fields are required');
+      if (password.length < 6) throw new Error('Password must be at least 6 characters long');
 
-      if (password.length < 6) {
-        throw new Error('Password must be at least 6 characters long');
-      }
+      const users = getUsers();
+      const existing = users.find((u) => u.email.toLowerCase() === email.toLowerCase());
+      if (existing) throw new Error('An account with this email already exists');
 
-      const { data, error } = await supabase.auth.signUp({
+      const newUser: StoredUser = {
+        uid: generateUid(),
         email,
-        password,
-        options: {
-          data: {
-            name: name
-          }
-        }
-      });
+        displayName: name,
+        passwordHash: hashPassword(password),
+      };
 
-      if (error) {
-        throw error;
-      }
+      saveUsers([...users, newUser]);
 
-      if (data.user) {
-        setUser(convertSupabaseUser(data.user));
-      }
-    } catch (error) {
-      console.error('Registration error:', error);
-      throw error;
+      const sessionUser: User = { uid: newUser.uid, email: newUser.email, displayName: newUser.displayName };
+      localStorage.setItem(SESSION_KEY, JSON.stringify(sessionUser));
+      setUser(sessionUser);
     } finally {
       setLoading(false);
     }
@@ -143,14 +124,8 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const logout = async () => {
     setLoading(true);
     try {
-      const { error } = await supabase.auth.signOut();
-      if (error) {
-        throw error;
-      }
+      localStorage.removeItem(SESSION_KEY);
       setUser(null);
-    } catch (error) {
-      console.error('Logout error:', error);
-      throw error;
     } finally {
       setLoading(false);
     }
@@ -159,20 +134,12 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const resetPassword = async (email: string) => {
     setLoading(true);
     try {
-      if (!email) {
-        throw new Error('Email is required');
-      }
-
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/reset-password`
-      });
-
-      if (error) {
-        throw error;
-      }
-    } catch (error) {
-      console.error('Password reset error:', error);
-      throw error;
+      if (!email) throw new Error('Email is required');
+      const users = getUsers();
+      const found = users.find((u) => u.email.toLowerCase() === email.toLowerCase());
+      if (!found) throw new Error('No account found with this email');
+      // In a real app, send a reset email. Here we just confirm the account exists.
+      alert(`Password reset: Since we are running locally, please contact the admin to reset the password for ${email}.`);
     } finally {
       setLoading(false);
     }
@@ -183,4 +150,4 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       {children}
     </AuthContext.Provider>
   );
-}; 
+};

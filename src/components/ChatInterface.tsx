@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import Sidebar from "@/components/Sidebar";
 import ChatArea from "@/components/ChatArea";
@@ -54,7 +54,7 @@ const ChatInterface = () => {
   }, [user]);
 
   // Handler to start a new chat session
-  const handleNewChat = async () => {
+  const handleNewChat = useCallback(async () => {
     if (!user) return;
     const newSession: ChatSession = {
       id: generateUUID(),
@@ -74,41 +74,43 @@ const ChatInterface = () => {
     await storageService.saveChatSession(newSession);
     setSessions(prev => [newSession, ...prev]);
     setCurrentSessionId(newSession.id);
-  };
+  }, [user]);
 
   // Handler to select a chat session
-  const handleSelectSession = (sessionId: string) => {
+  const handleSelectSession = useCallback((sessionId: string) => {
     setCurrentSessionId(sessionId);
-  };
+  }, []);
 
   // Handler to update a session (when messages change)
-  const handleUpdateSession = async (updatedSession: ChatSession) => {
+  const handleUpdateSession = useCallback(async (updatedSession: ChatSession) => {
     await storageService.saveChatSession(updatedSession);
     setSessions(prev => prev.map(s => s.id === updatedSession.id ? updatedSession : s));
-  };
+  }, []);
 
   // Handler to delete a session
-  const handleDeleteSession = async (sessionId: string) => {
+  const handleDeleteSession = useCallback(async (sessionId: string) => {
     if (!user) return;
     await storageService.deleteChatSession(sessionId, user.uid);
-    const remainingSessions = sessions.filter(s => s.id !== sessionId);
-    setSessions(remainingSessions);
-    
-    // If the deleted session was the current one, switch to the most recent remaining session
-    if (currentSessionId === sessionId) {
-      if (remainingSessions.length > 0) {
-        setCurrentSessionId(remainingSessions[0].id);
-      } else {
-        setCurrentSessionId(null);
+    setSessions(prev => {
+      const remainingSessions = prev.filter(s => s.id !== sessionId);
+
+      // If the deleted session was the current one, switch to the most recent remaining session
+      if (currentSessionId === sessionId) {
+        if (remainingSessions.length > 0) {
+          setCurrentSessionId(remainingSessions[0].id);
+        } else {
+          setCurrentSessionId(null);
+        }
       }
-    }
-  };
+      return remainingSessions;
+    });
+  }, [user, currentSessionId]);
 
   return (
     <div className="h-screen bg-gray-50 dark:bg-gray-900 flex transition-colors duration-300 overflow-hidden">
       {/* Mobile backdrop */}
       {sidebarOpen && (
-        <div 
+        <div
           className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden"
           onClick={() => setSidebarOpen(false)}
         />
@@ -149,7 +151,7 @@ const ChatInterface = () => {
               RAKSHITH 360
             </span>
           </div>
-          
+
           {/* User Info and Logout */}
           <div className="flex items-center space-x-2 sm:space-x-3">
             <span className="text-xs sm:text-sm text-gray-600 dark:text-gray-300 hidden sm:block">

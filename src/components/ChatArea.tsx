@@ -13,7 +13,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import SpecialtyDisplay from "./SpecialtyDisplay";
 import SpecialtyRecommendation from "./SpecialtyRecommendation";
 import FlashMode from "./FlashMode";
-import ApiKeyConfig from './ApiKeyConfig';
+
 import { cn } from '../lib/utils';
 import { callAIAPI, getSelectedModel, getApiKey, AI_MODELS, AIModel } from '@/lib/aiService';
 
@@ -54,7 +54,7 @@ const ChatArea = ({ sessionId, onUpdateSession }: ChatAreaProps) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [isTyping, setIsTyping] = useState(false);
-  const [userAnswers, setUserAnswers] = useState<{[key: string]: string}>({});
+  const [userAnswers, setUserAnswers] = useState<{ [key: string]: string }>({});
   const [currentlyShowingInteractive, setCurrentlyShowingInteractive] = useState(false);
   const [dynamicQuestions, setDynamicQuestions] = useState<DynamicQuestion[]>([]);
   const [dynamicAnswers, setDynamicAnswers] = useState<string[]>([]);
@@ -65,7 +65,7 @@ const ChatArea = ({ sessionId, onUpdateSession }: ChatAreaProps) => {
   const mainInputRef = useRef<HTMLInputElement>(null);
   const [inputPlaceholder, setInputPlaceholder] = useState("Describe your symptoms...");
   const [customAnswerMode, setCustomAnswerMode] = useState(false);
-  const [conversationHistory, setConversationHistory] = useState<{role: string, content: string}[]>([]);
+  const [conversationHistory, setConversationHistory] = useState<{ role: string, content: string }[]>([]);
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const [showUserFallback, setShowUserFallback] = useState(false);
   const [userFallbackInput, setUserFallbackInput] = useState("");
@@ -74,32 +74,30 @@ const ChatArea = ({ sessionId, onUpdateSession }: ChatAreaProps) => {
   const [flashMode, setFlashMode] = useState(false);
   const [loading, setLoading] = useState(false);
   const [selectedAIModel, setSelectedAIModel] = useState<AIModel>(getSelectedModel());
-  const [showApiKeyConfig, setShowApiKeyConfig] = useState(false);
+
   const [summaryError, setSummaryError] = useState<string | null>(null);
 
   // Function to load selected AI model and check API key
   const loadAIModel = useCallback(async () => {
     const model = getSelectedModel();
     setSelectedAIModel(model);
-    
-    // Get API key from localStorage first (for backward compatibility)
-    let apiKey = localStorage.getItem(`api_key_${model}`);
-    
+
+    // Check API key from environment variables only
+    const apiKey = getApiKey(model);
+
     console.log('🤖 Loading AI model...');
     console.log('   Selected model:', AI_MODELS[model].name);
     console.log('   API key present:', !!apiKey);
-    
-    if (apiKey && typeof apiKey === 'string') {
-      setShowApiKeyConfig(false);
+
+    if (apiKey) {
       console.log('✅ API key loaded successfully');
     }
-    // Don't show popup on initial load - only when user tries to send message
   }, []);
 
   // Load AI model and API key on component mount
   useEffect(() => {
     loadAIModel();
-    
+
     // Listen for storage changes to refresh when updated in Account Settings
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key?.startsWith('api_key_') || e.key === 'selected_ai_model') {
@@ -107,29 +105,24 @@ const ChatArea = ({ sessionId, onUpdateSession }: ChatAreaProps) => {
         loadAIModel();
       }
     };
-    
+
     window.addEventListener('storage', handleStorageChange);
-    
+
     // Also listen for custom event (for same-window updates)
     const handleCustomStorageChange = () => {
       console.log('🔄 AI settings updated (custom event), refreshing...');
       loadAIModel();
     };
-    
+
     window.addEventListener('apiKeyUpdated', handleCustomStorageChange);
-    
+
     return () => {
       window.removeEventListener('storage', handleStorageChange);
       window.removeEventListener('apiKeyUpdated', handleCustomStorageChange);
     };
   }, [loadAIModel]);
 
-  const handleApiKeySet = useCallback((key: string) => {
-    // Save the key for the currently selected model
-    storageService.saveApiKey(selectedAIModel === 'gemini' ? 'gemini' : selectedAIModel === 'deepseek' ? 'deepseek' : 'openai', key);
-    setShowApiKeyConfig(false);
-    loadAIModel();
-  }, [selectedAIModel, loadAIModel]);
+
 
   // Helper to normalize question text
   const normalizeQuestion = (q: string) => q.replace(/[^a-zA-Z0-9]+/g, '').toLowerCase();
@@ -220,7 +213,7 @@ const ChatArea = ({ sessionId, onUpdateSession }: ChatAreaProps) => {
           setConversationStep(staticStep);
 
           // Restore userAnswers
-          const answers: {[key: string]: string} = {};
+          const answers: { [key: string]: string } = {};
           msgs.forEach((msg, idx) => {
             if (msg.isInteractive && msg.selectedOption && msg.question) {
               answers[msg.question] = msg.selectedOption;
@@ -267,9 +260,14 @@ const ChatArea = ({ sessionId, onUpdateSession }: ChatAreaProps) => {
   }, [sessionId, user]); // Removed complex dependencies that could cause infinite loops
 
   // Save messages to session with debouncing
+  // Use refs to avoid dependency on unstable callbacks
+  const onUpdateSessionRef = useRef(onUpdateSession);
+  onUpdateSessionRef.current = onUpdateSession;
+
   useEffect(() => {
-    if (user && sessionId && messages.length > 0) { // Only save if there are messages and user/session exist
-      const timeoutId = setTimeout(async () => {
+    // Only save if there are messages and user/session exist
+    if (user && sessionId && messages.length > 0) {
+      const timeoutId = setTimeout(() => {
         try {
           const updatedSession: ChatSession = {
             id: sessionId,
@@ -279,16 +277,17 @@ const ChatArea = ({ sessionId, onUpdateSession }: ChatAreaProps) => {
             createdAt: messages[0]?.timestamp || new Date(),
             updatedAt: new Date(),
           };
-          await storageService.saveChatSession(updatedSession);
-          onUpdateSession(updatedSession); // Update parent state if needed
+          // Index.tsx already calls storageService.saveChatSession before updating state
+          // so we only need to call onUpdateSession here to prevent duplicates
+          onUpdateSessionRef.current(updatedSession);
         } catch (error) {
-          console.error('Error saving session:', error);
+          console.error('Error in debounced session update:', error);
         }
       }, 1000); // Debounce saves by 1 second
 
       return () => clearTimeout(timeoutId);
     }
-  }, [messages, user, sessionId, onUpdateSession]); // Added user and sessionId to dependencies
+  }, [messages, user, sessionId]);
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -303,10 +302,9 @@ const ChatArea = ({ sessionId, onUpdateSession }: ChatAreaProps) => {
   const callGeminiAPI = async (prompt: string) => {
     const apiKey = getApiKey(selectedAIModel);
     if (!apiKey) {
-      setShowApiKeyConfig(true);
-      return `⚠️ Missing API key for ${AI_MODELS[selectedAIModel].name}. Please configure your API key in Account Settings to continue.`;
+      return `⚠️ Missing API key for ${AI_MODELS[selectedAIModel].name}. Please add VITE_${AI_MODELS[selectedAIModel].apiKeyName.toUpperCase()}_API_KEY to your .env file and restart the dev server.`;
     }
-    
+
     try {
       const medicalPrompt = `You are an experienced medical professional certified in emergency medicine and first aid. Based on the patient's information and ALL user answers, provide a clear and concise medical assessment. Your response MUST use the following section headings, in this exact order, with double asterisks and a colon, and nothing else:
 **SUMMARY OF CASE:**
@@ -329,16 +327,15 @@ ${prompt}`;
       return responseText;
     } catch (error: any) {
       console.error(`❌ Error calling ${AI_MODELS[selectedAIModel].name} API:`, error);
-      
+
       if (error?.message?.includes('Failed to fetch') || error?.message?.includes('NetworkError')) {
         return "Network error: Please check your internet connection and try again.";
       }
-      
+
       if (error?.message?.includes('API key')) {
-        setShowApiKeyConfig(true);
-        return error.message;
+        return `⚠️ API key error: ${error.message}. Please check your .env file configuration.`;
       }
-      
+
       return `I apologize, but I'm having trouble connecting to the ${AI_MODELS[selectedAIModel].name} service. Error: ${error?.message || 'Unknown error'}. Please check your API key configuration and try again.`;
     }
   };
@@ -347,17 +344,16 @@ ${prompt}`;
     const apiKey = getApiKey(selectedAIModel);
     if (!apiKey) {
       console.error('No API key available for dynamic questions');
-      setShowApiKeyConfig(true);
       return {
         question: "Can you provide more details about your symptoms?",
         options: ["Yes", "No", "Not sure", "Need to clarify"]
       };
     }
-    
+
     try {
       // Get the main complaint from the first user message
       const mainComplaint = messages.find(m => m.sender === "user")?.text || "";
-      
+
       // Format the answers for better context
       const formattedAnswers = Object.entries(answers).map(([key, value]) => {
         const question = messages.find(m => m.question === key)?.question || key;
@@ -408,108 +404,108 @@ Question: [Your specific, targeted question here]
 
       try {
         const text = await callAIAPI(prompt, selectedAIModel);
-            console.log('📝 AI Response text:', text);
-            console.log('📏 Response length:', text.length);
+        console.log('📝 AI Response text:', text);
+        console.log('📏 Response length:', text.length);
 
-            // Check if AI has enough information
-            if (text.trim().toUpperCase().includes('ENOUGH_INFO')) {
-              console.log('✅ AI determined enough information gathered');
-              return null; // Signal to proceed to summary
-            }
+        // Check if AI has enough information
+        if (text.trim().toUpperCase().includes('ENOUGH_INFO')) {
+          console.log('✅ AI determined enough information gathered');
+          return null; // Signal to proceed to summary
+        }
 
-            // Parse the response to extract question and options
-            const lines = text.split('\n').filter(line => line.trim());
-            console.log('📄 Parsed lines:', lines);
-            
-            // Extract question - try multiple formats
-            let questionLine = lines.find(line => line.toLowerCase().startsWith('question:'));
-            if (!questionLine) {
-              questionLine = lines.find(line => !/^\d+\./.test(line.trim()) && line.trim().length > 10);
-            }
-            
-            let question = questionLine ? questionLine.replace(/^question:\s*/i, '').trim() : '';
-            console.log('❓ Extracted question:', question);
+        // Parse the response to extract question and options
+        const lines = text.split('\n').filter(line => line.trim());
+        console.log('📄 Parsed lines:', lines);
 
-            // Post-process: If question is too long, trim to 110 chars at last space
-            if (question.length > 110) {
-              const trimmed = question.slice(0, 110);
-              const lastSpace = trimmed.lastIndexOf(' ');
-              question = trimmed.slice(0, lastSpace > 80 ? lastSpace : 110) + '...';
-            }
+        // Extract question - try multiple formats
+        let questionLine = lines.find(line => line.toLowerCase().startsWith('question:'));
+        if (!questionLine) {
+          questionLine = lines.find(line => !/^\d+\./.test(line.trim()) && line.trim().length > 10);
+        }
 
-            // Extract options - try multiple formats
-            let options = lines
-              .filter(line => /^\d+\./.test(line.trim()))
-              .map(line => line.replace(/^\d+\.\s*/, '').trim())
-              .filter(opt => opt.length > 0);
+        let question = questionLine ? questionLine.replace(/^question:\s*/i, '').trim() : '';
+        console.log('❓ Extracted question:', question);
 
-            // If no numbered options, try bullet points or other formats
-            if (options.length < 2) {
-              options = lines
-                .filter(line => /^[-•*]/.test(line.trim()))
-                .map(line => line.replace(/^[-•*]\s*/, '').trim())
-                .filter(opt => opt.length > 0);
-            }
+        // Post-process: If question is too long, trim to 110 chars at last space
+        if (question.length > 110) {
+          const trimmed = question.slice(0, 110);
+          const lastSpace = trimmed.lastIndexOf(' ');
+          question = trimmed.slice(0, lastSpace > 80 ? lastSpace : 110) + '...';
+        }
 
-            console.log('📋 Extracted options:', options);
+        // Extract options - try multiple formats
+        let options = lines
+          .filter(line => /^\d+\./.test(line.trim()))
+          .map(line => line.replace(/^\d+\.\s*/, '').trim())
+          .filter(opt => opt.length > 0);
 
-            // Fallback: If no options, provide generic options
-            if (!question || options.length < 2) {
-              console.warn('⚠️ Question or options missing, using fallback');
-              console.warn('   Question found:', !!question);
-              console.warn('   Options count:', options.length);
-              console.warn('   Raw response was:', text.substring(0, 200));
-              
-              // Try to extract question from first line if not found
-              if (!question && lines.length > 0) {
-                question = lines[0].trim();
-                question = question.replace(/^(question|q|ask):\s*/i, '').trim();
-              }
-              
-              // Try to extract options from any lines
-              if (options.length < 2) {
-                options = lines
-                  .filter(line => {
-                    const trimmed = line.trim();
-                    return trimmed.length > 0 && 
-                           (trimmed.match(/^[a-z]\)/i) || 
-                            trimmed.match(/^[-•*]/) ||
-                            trimmed.match(/^[A-Z][a-z]+/));
-                  })
-                  .map(line => {
-                    return line
-                      .replace(/^[a-z]\)\s*/i, '')
-                      .replace(/^[-•*]\s*/, '')
-                      .trim();
-                  })
-                  .filter(opt => opt.length > 0 && opt.length < 100);
-              }
-              
-              return {
-                question: question || "Can you provide more details about your symptoms?",
-                options: options.length >= 2 ? options : ["Yes", "No", "Not sure", "Need to clarify"]
-              };
-            }
+        // If no numbered options, try bullet points or other formats
+        if (options.length < 2) {
+          options = lines
+            .filter(line => /^[-•*]/.test(line.trim()))
+            .map(line => line.replace(/^[-•*]\s*/, '').trim())
+            .filter(opt => opt.length > 0);
+        }
 
-            console.log('✅ Successfully generated dynamic question');
-            return { question, options };
-          } catch (error: any) {
-            console.error(`❌ Error calling ${AI_MODELS[selectedAIModel].name} API:`, error);
-            throw error;
+        console.log('📋 Extracted options:', options);
+
+        // Fallback: If no options, provide generic options
+        if (!question || options.length < 2) {
+          console.warn('⚠️ Question or options missing, using fallback');
+          console.warn('   Question found:', !!question);
+          console.warn('   Options count:', options.length);
+          console.warn('   Raw response was:', text.substring(0, 200));
+
+          // Try to extract question from first line if not found
+          if (!question && lines.length > 0) {
+            question = lines[0].trim();
+            question = question.replace(/^(question|q|ask):\s*/i, '').trim();
           }
-  } catch (error: any) {
+
+          // Try to extract options from any lines
+          if (options.length < 2) {
+            options = lines
+              .filter(line => {
+                const trimmed = line.trim();
+                return trimmed.length > 0 &&
+                  (trimmed.match(/^[a-z]\)/i) ||
+                    trimmed.match(/^[-•*]/) ||
+                    trimmed.match(/^[A-Z][a-z]+/));
+              })
+              .map(line => {
+                return line
+                  .replace(/^[a-z]\)\s*/i, '')
+                  .replace(/^[-•*]\s*/, '')
+                  .trim();
+              })
+              .filter(opt => opt.length > 0 && opt.length < 100);
+          }
+
+          return {
+            question: question || "Can you provide more details about your symptoms?",
+            options: options.length >= 2 ? options : ["Yes", "No", "Not sure", "Need to clarify"]
+          };
+        }
+
+        console.log('✅ Successfully generated dynamic question');
+        return { question, options };
+      } catch (error: any) {
+        console.error(`❌ Error calling ${AI_MODELS[selectedAIModel].name} API:`, error);
+        throw error;
+      }
+    } catch (error: any) {
       console.error('❌ Error generating dynamic question:', error);
       console.error('   Error type:', error instanceof Error ? error.constructor.name : typeof error);
       console.error('   Error message:', error instanceof Error ? error.message : String(error));
       console.error('   Error stack:', error instanceof Error ? error.stack : 'No stack trace');
-      
+
       // Generate a smart fallback question based on the answers
       const mainComplaint = messages.find(m => m.sender === "user")?.text || "";
       const answerCount = Object.keys(answers).length;
-      
+
       let fallbackQuestion = "Can you provide more details about your symptoms?";
       let fallbackOptions = ["Yes", "No", "Not sure", "Need to clarify"];
-      
+
       // Smart fallback based on context
       if (mainComplaint.toLowerCase().includes('pain')) {
         fallbackQuestion = "Where exactly is the pain located?";
@@ -524,9 +520,9 @@ Question: [Your specific, targeted question here]
         fallbackQuestion = "Are there any other symptoms you haven't mentioned?";
         fallbackOptions = ["Yes, there are more", "No, that's all", "Not sure", "Need to think"];
       }
-      
+
       console.log('🔄 Using smart fallback question:', fallbackQuestion);
-      
+
       return {
         question: fallbackQuestion,
         options: fallbackOptions
@@ -624,7 +620,7 @@ Question: [Your specific, targeted question here]
   };
 
   // Function to get the next best question from the AI
-  const getNextAIQuestion = async (history: {role: string, content: string}[], retryCount = 0): Promise<DynamicQuestion | null> => {
+  const getNextAIQuestion = async (history: { role: string, content: string }[], retryCount = 0): Promise<DynamicQuestion | null> => {
     if (totalQuestionsAsked() >= MAX_TOTAL_QUESTIONS) {
       console.log('Maximum questions reached, proceeding to summary');
       proceedToSummary(userAnswers);
@@ -633,10 +629,10 @@ Question: [Your specific, targeted question here]
 
     const answers = getAllUserAnswers();
     const previousQuestions = getAllAskedQuestions();
-    
+
     try {
       const dynamicQuestion = await callGeminiForDynamicQuestions(answers, previousQuestions);
-      
+
       // If AI returns null, it means it has enough information
       if (!dynamicQuestion) {
         console.log('AI determined enough information gathered, proceeding to summary');
@@ -672,7 +668,7 @@ Question: [Your specific, targeted question here]
       const currentMessage = messages[messages.length - 1];
       const currentQuestionId = normalizeQuestion(currentMessage.question || '');
       setAskedQuestionIds(prev => new Set([...prev, currentQuestionId]));
-      
+
       // Create new messages array with user response
       const newMessages: Message[] = [
         ...messages,
@@ -741,24 +737,24 @@ Question: [Your specific, targeted question here]
           console.log('📊 Current answers:', Object.keys(newAnswers).length);
           console.log('❓ Questions asked so far:', totalQuestionsAsked());
           console.log('📋 Max questions:', MAX_TOTAL_QUESTIONS);
-          
+
           setConversationStep(conversationFlow.length);
           setIsGeneratingDynamic(true);
-          
+
           try {
             const previousQuestions = getAllAskedQuestions();
             console.log('📝 Previous questions:', previousQuestions);
-            
+
             const dynamicQuestion = await callGeminiForDynamicQuestions(newAnswers, previousQuestions);
             console.log('🔍 Dynamic question result:', dynamicQuestion ? 'Question received' : 'No question (enough info)');
-            
+
             if (dynamicQuestion && dynamicQuestion.question) {
               const dynamicQuestionId = normalizeQuestion(dynamicQuestion.question);
               console.log('✅ Dynamic question generated:', dynamicQuestion.question);
               console.log('🔍 Question ID:', dynamicQuestionId);
               console.log('🔍 Already asked?', askedQuestionIds.has(dynamicQuestionId));
               console.log('🔍 Similar question?', isSimilarQuestion(dynamicQuestion.question));
-              
+
               if (!askedQuestionIds.has(dynamicQuestionId) && !isSimilarQuestion(dynamicQuestion.question)) {
                 console.log('✅ Question is new, adding to chat...');
                 setTimeout(() => {
@@ -803,14 +799,14 @@ Question: [Your specific, targeted question here]
         // Handle dynamic questions
         console.log('🔄 Handling dynamic question flow');
         const allAnswers = getAllUserAnswers();
-        
+
         try {
           const nextDynamicQuestion = await callGeminiForDynamicQuestions(allAnswers, getAllAskedQuestions());
-          
+
           if (nextDynamicQuestion && totalQuestionsAsked() < MAX_TOTAL_QUESTIONS) {
             const nextDynamicQuestionId = normalizeQuestion(nextDynamicQuestion.question || '');
             console.log('✅ Dynamic question received:', nextDynamicQuestion.question);
-            
+
             // Check if this dynamic question was already asked using the Set and enhanced similarity check
             if (!askedQuestionIds.has(nextDynamicQuestionId) && !isSimilarQuestion(nextDynamicQuestion.question)) {
               setTimeout(() => {
@@ -856,15 +852,15 @@ Question: [Your specific, targeted question here]
     setCurrentlyShowingInteractive(false);
     setShowUserFallback(false);
     setSummaryError(null); // Reset error
-    
+
     // Use all collected answers if not provided
     const answers = finalAnswers || getAllUserAnswers();
     console.log('📊 Collected answers:', Object.keys(answers).length, 'answers');
-    
+
     // Build a structured summary prompt
     const mainComplaint = messages.find(m => m.sender === "user")?.text || "";
     console.log('🏥 Main complaint:', mainComplaint);
-    
+
     // Build patient details for the summary - callGeminiAPI already has the correct format
     const patientDetails = `Main Complaint: ${mainComplaint}
 
@@ -878,32 +874,32 @@ Please provide a comprehensive medical assessment based on the above information
       const aiResponseText = await callGeminiAPI(patientDetails);
       console.log('✅ Summary received, length:', aiResponseText.length);
       console.log('📄 Full API response:', aiResponseText);
-      
+
       // Check if the response is an error message
-      if (aiResponseText.includes('apologize') || 
-          aiResponseText.includes('trouble connecting') || 
-          aiResponseText.includes('API key') ||
-          aiResponseText.includes('authentication failed') ||
-          aiResponseText.includes('quota') ||
-          aiResponseText.includes('limit')) {
+      if (aiResponseText.includes('apologize') ||
+        aiResponseText.includes('trouble connecting') ||
+        aiResponseText.includes('API key') ||
+        aiResponseText.includes('authentication failed') ||
+        aiResponseText.includes('quota') ||
+        aiResponseText.includes('limit')) {
         setIsTyping(false);
         setSummaryError(aiResponseText || "Unable to generate analysis. Please check your API key and try again.");
         return;
       }
-      
+
       setTimeout(() => {
         setIsTyping(false);
         console.log('📝 Parsing summary sections...');
-        
+
         // Split the Gemini response into sections and group by concept
         const sections = parseGeminiSummarySections(aiResponseText);
         console.log('📑 Parsed sections:', sections.length, sections.map(s => s.type));
-        
+
         if (sections.length === 0) {
           console.error('❌ No sections found in summary response');
           console.error('📄 Full response text:', aiResponseText);
           console.error('📄 Response preview (first 500 chars):', aiResponseText.substring(0, 500));
-          
+
           // Try to display the raw response if parsing fails
           if (aiResponseText && aiResponseText.trim().length > 0) {
             // Create a fallback message with the raw response
@@ -918,13 +914,13 @@ Please provide a comprehensive medical assessment based on the above information
             setSummaryError(null);
             return;
           }
-          
+
           setSummaryError("Unable to parse the medical assessment. The AI response format was unexpected. Please try again or check your API key.");
           return;
         }
-        
+
         let nextId = messages.length + 2;
-        
+
         // Group sections by their type
         const groupedSections = sections.reduce<Record<string, string[]>>((acc, section) => {
           const type = section.type.trim();
@@ -936,14 +932,14 @@ Please provide a comprehensive medical assessment based on the above information
         }, {});
 
         // Extract recommended specialty from the sections with improved logic
-        const specialtySection = sections.find(section => 
+        const specialtySection = sections.find(section =>
           section.type.toLowerCase().includes("recommended specialty") ||
           section.type.toLowerCase().includes("specialty")
         );
-        
+
         const specialtyText = specialtySection ? specialtySection.content.toLowerCase().trim() : "general medicine";
         console.log('🏥 Extracted specialty text:', specialtyText);
-        
+
         // Enhanced specialty extraction with better mapping
         const specialties = extractSpecialties(specialtyText);
         console.log('🏥 Mapped specialties:', specialties);
@@ -965,7 +961,7 @@ Please provide a comprehensive medical assessment based on the above information
         console.log('💬 Adding summary messages:', newSectionMessages.length, 'messages');
         setMessages(prev => [...prev, ...newSectionMessages]);
         setSummaryError(null); // Clear error if successful
-        
+
         // Wait for summary sections to be displayed, THEN show hospitals
         console.log('⏳ Waiting before showing hospitals...');
         setTimeout(() => {
@@ -1000,12 +996,12 @@ Please provide a comprehensive medical assessment based on the above information
     const sections: { type: string; content: string }[] = [];
     console.log('📄 Parsing summary, length:', summary.length);
     console.log('📄 Summary preview:', summary.substring(0, 500));
-    
+
     if (!summary || summary.trim().length === 0) {
       console.error('❌ Empty summary received');
       return sections;
     }
-    
+
     // Try multiple regex patterns to catch different formats
     const regexPatterns = [
       /\*\*([\w\s\-]+):\*\*[\r\n]*([\s\S]*?)(?=(\*\*[\w\s\-]+:\*\*|$))/gi, // Standard format with colon
@@ -1013,14 +1009,14 @@ Please provide a comprehensive medical assessment based on the above information
       /##\s*([\w\s\-]+)[\r\n]*([\s\S]*?)(?=(##\s*[\w\s\-]+|$))/gi,          // Markdown headers
       /^([A-Z][\w\s\-]+):[\r\n]*([\s\S]*?)(?=^[A-Z][\w\s\-]+:|$)/gmi,       // Plain text headers
     ];
-    
+
     let foundSections = false;
-    
+
     for (const regex of regexPatterns) {
       let match;
       regex.lastIndex = 0; // Reset regex
       const tempSections: { type: string; content: string }[] = [];
-      
+
       while ((match = regex.exec(summary))) {
         const type = match[1].trim();
         const content = match[2].trim();
@@ -1030,25 +1026,25 @@ Please provide a comprehensive medical assessment based on the above information
           foundSections = true;
         }
       }
-      
+
       if (tempSections.length > 0) {
         sections.push(...tempSections);
         break; // Use first pattern that finds sections
       }
     }
-    
+
     // Fallback: if no sections found, try to split by common patterns
     if (sections.length === 0) {
       console.warn('⚠️ No sections found with regex, trying fallback parsing...');
       const lines = summary.split('\n');
       let currentSection: { type: string; content: string } | null = null;
-      
+
       for (const line of lines) {
         // Check if line is a section header (more flexible matching)
-        const headerMatch = line.match(/\*\*([\w\s\-]+):?\*\*/i) || 
-                           line.match(/##\s*([\w\s\-]+)/i) ||
-                           line.match(/^([A-Z][\w\s\-]+):\s*$/i);
-        
+        const headerMatch = line.match(/\*\*([\w\s\-]+):?\*\*/i) ||
+          line.match(/##\s*([\w\s\-]+)/i) ||
+          line.match(/^([A-Z][\w\s\-]+):\s*$/i);
+
         if (headerMatch) {
           if (currentSection && currentSection.content.trim()) {
             sections.push(currentSection);
@@ -1073,7 +1069,7 @@ Please provide a comprehensive medical assessment based on the above information
         sections.push(currentSection);
       }
     }
-    
+
     console.log('📑 Total sections parsed:', sections.length);
     if (sections.length > 0) {
       sections.forEach((s, i) => {
@@ -1116,13 +1112,13 @@ Please provide a comprehensive medical assessment based on the above information
 
     // Get the next question from AI with enhanced duplicate detection
     const nextDynamicQuestion = await getNextAIQuestion([], 0);
-    
+
     if (nextDynamicQuestion && totalQuestionsAsked() < MAX_TOTAL_QUESTIONS) {
       // Double-check for duplicates before adding
       if (!isSimilarQuestion(nextDynamicQuestion.question)) {
         // Add the new question to dynamic questions
         setDynamicQuestions(prev => [...prev, nextDynamicQuestion]);
-        
+
         // Add the interactive message
         const interactiveMessage: Message = {
           id: Date.now(),
@@ -1132,7 +1128,7 @@ Please provide a comprehensive medical assessment based on the above information
           question: nextDynamicQuestion.question,
           options: toInteractiveOptions(nextDynamicQuestion.options, Date.now())
         };
-        
+
         setMessages(prev => [...prev, interactiveMessage]);
         setCurrentlyShowingInteractive(true);
         setAllAskedQuestions(prev => [...prev, nextDynamicQuestion.question.toLowerCase().trim()]);
@@ -1198,16 +1194,16 @@ Please provide a comprehensive medical assessment based on the above information
     } else {
       // Static questions completed, now ask dynamic questions based on AI assessment
       console.log('Static questions completed, starting dynamic AI assessment');
-      
+
       // Get the first dynamic question from AI
       const firstDynamicQuestion = await getNextAIQuestion([], 0);
-      
+
       if (firstDynamicQuestion && totalQuestionsAsked() < MAX_TOTAL_QUESTIONS) {
         // Double-check for duplicates before adding
         if (!isSimilarQuestion(firstDynamicQuestion.question)) {
           // Add the new question to dynamic questions
           setDynamicQuestions([firstDynamicQuestion]);
-          
+
           // Add the interactive message
           const interactiveMessage: Message = {
             id: Date.now(),
@@ -1217,7 +1213,7 @@ Please provide a comprehensive medical assessment based on the above information
             question: firstDynamicQuestion.question,
             options: toInteractiveOptions(firstDynamicQuestion.options, Date.now())
           };
-          
+
           setMessages(prev => [...prev, interactiveMessage]);
           setCurrentlyShowingInteractive(true);
           setAllAskedQuestions(prev => [...prev, firstDynamicQuestion.question.toLowerCase().trim()]);
@@ -1265,14 +1261,14 @@ Please provide a comprehensive medical assessment based on the above information
   const cleanSpecialtyName = (specialty: string): string => {
     // Remove extra text and keep only the specialty name
     let cleaned = specialty.toLowerCase().trim();
-    
+
     // Remove common extra words
     cleaned = cleaned.replace(/^(primary specialty|recommended specialty|specialty needed|specialty required|specialty|primary|recommended|needed|required):?\s*/i, '');
     cleaned = cleaned.replace(/^(brief reason|reason|why):?\s*/i, '');
     cleaned = cleaned.replace(/^(for|to|in|at|with|the|a|an)\s+/i, '');
     cleaned = cleaned.replace(/\s+(for|to|in|at|with|the|a|an)\s+/i, ' ');
     cleaned = cleaned.replace(/\s+$/i, '');
-    
+
     // Normalize specific specialties
     const specialtyMap: { [key: string]: string } = {
       'general practitioner': 'general medicine',
@@ -1335,14 +1331,14 @@ Please provide a comprehensive medical assessment based on the above information
       'women': 'gynecology',
       'reproductive': 'gynecology'
     };
-    
+
     // Find the best match
     for (const [key, value] of Object.entries(specialtyMap)) {
       if (cleaned.includes(key) || key.includes(cleaned)) {
         return value;
       }
     }
-    
+
     // Default to general medicine if no match found
     return 'general medicine';
   };
@@ -1412,10 +1408,10 @@ Please provide a comprehensive medical assessment based on the above information
 
   function toInteractiveOptions(options: unknown, messageId?: number): InteractiveOption[] {
     if (Array.isArray(options) && typeof options[0] === 'string') {
-      return (options as string[]).map((opt, idx) => ({ 
-        id: messageId ? `${messageId}-opt-${idx}` : String(idx + 1), 
-        label: opt, 
-        value: opt.toLowerCase().replace(/\s+/g, '_') 
+      return (options as string[]).map((opt, idx) => ({
+        id: messageId ? `${messageId}-opt-${idx}` : String(idx + 1),
+        label: opt,
+        value: opt.toLowerCase().replace(/\s+/g, '_')
       }));
     }
     return options as InteractiveOption[];
@@ -1458,7 +1454,7 @@ Please provide a comprehensive medical assessment based on the above information
                 onClick={() => setFlashMode(true)}
               >
                 <span className="flex items-center justify-center">
-                  <svg className="w-3 h-3 mr-1 text-emerald-300 drop-shadow" style={{width:'12px',height:'12px'}} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                  <svg className="w-3 h-3 mr-1 text-emerald-300 drop-shadow" style={{ width: '12px', height: '12px' }} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
                 </span>
                 Flash Mode
                 <span className="absolute left-0 top-0 w-full h-full pointer-events-none overflow-hidden rounded-full">
@@ -1470,13 +1466,7 @@ Please provide a comprehensive medical assessment based on the above information
         </div>
       </div>
 
-      {/* API Key Configuration Modal */}
-      {showApiKeyConfig && (
-        <ApiKeyConfig 
-          onApiKeySet={handleApiKeySet} 
-          onClose={() => setShowApiKeyConfig(false)}
-        />
-      )}
+
 
       {/* Messages Area - scrollable */}
       <div ref={chatContainerRef} className="flex-1 overflow-y-auto p-4 space-y-6">
@@ -1486,9 +1476,8 @@ Please provide a comprehensive medical assessment based on the above information
           return (
             <React.Fragment key={message.id}>
               <div
-                className={`flex items-start space-x-3 ${
-                  message.sender === "user" ? "justify-end" : "justify-start"
-                }`}
+                className={`flex items-start space-x-3 ${message.sender === "user" ? "justify-end" : "justify-start"
+                  }`}
               >
                 {message.sender === "ai" && (
                   <div className={`w-7 h-7 bg-gradient-to-r from-blue-600 to-purple-600 rounded-full flex flex-col items-center justify-center flex-shrink-0 p-0.5 relative ${isTyping ? 'animate-bounce' : ''}`}>
@@ -1497,13 +1486,12 @@ Please provide a comprehensive medical assessment based on the above information
                   </div>
                 )}
                 <div
-                  className={`max-w-fit min-w-[40px] sm:min-w-[60px] lg:min-w-[80px] max-w-[65vw] sm:max-w-xs lg:max-w-md rounded-lg px-1 sm:px-2 py-1 text-xs break-words ${
-                    message.showHospitals // Apply black background specifically for hospital recommendations
-                      ? "bg-black text-white shadow-lg"
-                      : message.sender === "user"
+                  className={`max-w-fit min-w-[40px] sm:min-w-[60px] lg:min-w-[80px] max-w-[65vw] sm:max-w-xs lg:max-w-md rounded-lg px-1 sm:px-2 py-1 text-xs break-words ${message.showHospitals // Apply black background specifically for hospital recommendations
+                    ? "bg-black text-white shadow-lg"
+                    : message.sender === "user"
                       ? "bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-800 dark:text-gray-200 shadow-md"
                       : "bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-lg animate-fade-in"
-                  } transition-all duration-300 hover:shadow-lg overflow-hidden`}
+                    } transition-all duration-300 hover:shadow-lg overflow-hidden`}
                 >
                   {message.isInteractive ? (
                     <InteractiveMessage
@@ -1548,7 +1536,7 @@ Please provide a comprehensive medical assessment based on the above information
                           .filter(line => line.length > 0)
                           .map((line, idx) => (
                             <div key={`${message.id}-line-${idx}`} className="flex items-start">
-                              <span className="mr-2 text-lg text-blue-400" style={{lineHeight: '1'}}>&bull;</span>
+                              <span className="mr-2 text-lg text-blue-400" style={{ lineHeight: '1' }}>&bull;</span>
                               <span>{line}</span>
                             </div>
                           ))}
@@ -1560,9 +1548,9 @@ Please provide a comprehensive medical assessment based on the above information
                     <p className="text-sm leading-relaxed whitespace-pre-line">{message.text}</p>
                   )}
                   <p className="text-xs mt-2 opacity-70">
-                    {message.timestamp.toLocaleTimeString([], { 
-                      hour: '2-digit', 
-                      minute: '2-digit' 
+                    {message.timestamp.toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit'
                     })}
                   </p>
                 </div>
@@ -1582,7 +1570,7 @@ Please provide a comprehensive medical assessment based on the above information
             </React.Fragment>
           );
         })}
-        
+
         {isTyping && <TypingIndicator />}
         {showUserFallback && (
           <div className="max-w-xs lg:max-w-md mx-auto bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-4 mt-4 animate-fade-in">

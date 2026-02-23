@@ -9,7 +9,6 @@ import rakshithShield from "@/assets/rakshith360-shield.svg";
 import { useToast } from '@/hooks/use-toast';
 
 const LoginForm = () => {
-  console.log('LoginForm rendered');
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -19,7 +18,7 @@ const LoginForm = () => {
   const [resetEmail, setResetEmail] = useState('');
   const [resetMessage, setResetMessage] = useState('');
   const [resetError, setResetError] = useState('');
-  
+
   const { login, register, loading, resetPassword } = useAuth();
   const { toast } = useToast();
 
@@ -123,7 +122,7 @@ const LoginForm = () => {
               <TabsTrigger value="login" className="text-gray-300">Login</TabsTrigger>
               <TabsTrigger value="register" className="text-gray-300">Register</TabsTrigger>
             </TabsList>
-            
+
             {!showReset ? (
               <form onSubmit={handleSubmit} className="space-y-4 mt-6">
                 {!isLogin && (
@@ -142,7 +141,7 @@ const LoginForm = () => {
                     </div>
                   </div>
                 )}
-                
+
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-gray-300">Email</label>
                   <div className="relative">
@@ -157,7 +156,7 @@ const LoginForm = () => {
                     />
                   </div>
                 </div>
-                
+
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-gray-300">Password</label>
                   <div className="relative">
@@ -172,7 +171,7 @@ const LoginForm = () => {
                     />
                   </div>
                 </div>
-                
+
                 {isLogin && (
                   <div className="text-right mb-2">
                     <button
@@ -184,13 +183,13 @@ const LoginForm = () => {
                     </button>
                   </div>
                 )}
-                
+
                 {error && (
                   <div className="text-red-500 bg-red-100 border border-red-300 rounded px-3 py-2 text-sm text-center mb-2">
                     {error}
                   </div>
                 )}
-                
+
                 <Button
                   type="submit"
                   disabled={loading}
@@ -229,7 +228,7 @@ const LoginForm = () => {
                 </div>
               </form>
             )}
-            
+
             <div className="mt-4 text-center">
               <p className="text-xs text-gray-500">
                 Rakshith AI may provide inaccurate information if you don't provide precise details.

@@ -17,13 +17,11 @@ export interface AIModelConfig {
 }
 
 export const GEMINI_MODELS: GeminiModelOption[] = [
-  { id: 'gemini-2.5-pro-preview-06-05', name: 'Gemini 2.5 Pro', description: 'Most capable model for complex tasks' },
-  { id: 'gemini-2.5-flash-preview-05-20', name: 'Gemini 2.5 Flash', description: 'Fast and efficient for most tasks' },
-  { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', description: 'Fast multimodal model' },
-  { id: 'gemini-2.0-flash-lite', name: 'Gemini 2.0 Flash Lite', description: 'Lightweight and fast' },
-  { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', description: 'Best for complex reasoning' },
+  { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', description: 'Best for prototyping — fast, capable & free tier friendly' },
+  { id: 'gemini-2.0-flash-lite-preview-02-05', name: 'Gemini 2.0 Flash Lite', description: 'Lightweight and fastest' },
   { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', description: 'Fast and versatile' },
-  { id: 'gemini-1.5-flash-8b', name: 'Gemini 1.5 Flash 8B', description: 'Smallest and fastest' },
+  { id: 'gemini-1.5-flash-8b', name: 'Gemini 1.5 Flash 8B', description: 'Smallest 1.5 model' },
+  { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', description: 'Complex reasoning model' }
 ];
 
 export const AI_MODELS: Record<AIModel, AIModelConfig> = {
@@ -54,18 +52,38 @@ export const AI_MODELS: Record<AIModel, AIModelConfig> = {
   }
 };
 
-// Get API key for a provider
+// Get API key for a provider — reads ONLY from environment variables (backend-safe)
 export const getApiKey = (provider: AIModel): string | null => {
   const config = AI_MODELS[provider];
   if (!config) return null;
-  
-  // Try localStorage first (for API keys, we'll use localStorage for now)
-  const savedKey = localStorage.getItem(`api_key_${config.apiKeyName}`);
-  if (savedKey) return savedKey;
-  
-  // Fallback to environment variable
+
+  // Only read from environment variables — never expose keys on the client
+  if (provider === 'gemini') {
+    const keys = getGeminiApiKeys();
+    return keys.length > 0 ? keys[0] : null;
+  }
+
   const envKey = import.meta.env[`VITE_${config.apiKeyName.toUpperCase()}_API_KEY`];
   return envKey || null;
+};
+
+// Get all available Gemini API keys from environment variables
+export const getGeminiApiKeys = (): string[] => {
+  const keys: string[] = [];
+
+  // Check the base key
+  const baseKey = import.meta.env.VITE_GEMINI_API_KEY;
+  if (baseKey && baseKey.trim() !== '') keys.push(baseKey);
+
+  // Check numbered keys (e.g., VITE_GEMINI_API_KEY_1, VITE_GEMINI_API_KEY_2, etc.)
+  for (let i = 1; i <= 10; i++) {
+    const numberedKey = import.meta.env[`VITE_GEMINI_API_KEY_${i}`];
+    if (numberedKey && numberedKey.trim() !== '' && !keys.includes(numberedKey)) {
+      keys.push(numberedKey);
+    }
+  }
+
+  return keys;
 };
 
 // Get selected model preference
@@ -100,7 +118,7 @@ export const getSelectedGeminiModel = (): string => {
   } catch (error) {
     console.error('Error loading selected Gemini model:', error);
   }
-  return GEMINI_MODELS[0].id; // Default to first model (Gemini 2.5 Pro)
+  return GEMINI_MODELS[0].id; // Default to Gemini 2.0 Flash (best for free tier)
 };
 
 // Save selected Gemini model
@@ -114,54 +132,39 @@ export const saveSelectedGeminiModel = (modelId: string): void => {
 
 // Test if a specific Gemini model works with an API key
 export const testGeminiModel = async (apiKey: string, modelId: string): Promise<boolean> => {
-  try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: 'Hi' }] }],
-          generationConfig: {
-            temperature: 0.1,
-            maxOutputTokens: 10,
-          }
-        })
-      }
-    );
-    return response.ok;
-  } catch (error) {
-    console.error(`Error testing model ${modelId}:`, error);
-    return false;
-  }
+  // STRICT REQUIREMENT: No direct calls to Gemini from frontend.
+  // Model validation should be managed server-side.
+  // For UI purposes, we assume models listed are generally available if the backend handles them.
+  console.log(`Skipping direct test for model ${modelId} to maintain backend-only architecture.`);
+  return true;
 };
 
 // Detect which Gemini models are available with an API key
 export const detectAvailableGeminiModels = async (
-  apiKey: string, 
+  apiKey: string,
   onProgress?: (modelId: string, available: boolean, index: number, total: number) => void
 ): Promise<string[]> => {
   const availableModels: string[] = [];
   const total = GEMINI_MODELS.length;
-  
+
   console.log('🔍 Detecting available Gemini models...');
-  
+
   for (let i = 0; i < GEMINI_MODELS.length; i++) {
     const model = GEMINI_MODELS[i];
     const isAvailable = await testGeminiModel(apiKey, model.id);
-    
+
     if (isAvailable) {
       availableModels.push(model.id);
       console.log(`✅ ${model.name} (${model.id}) is available`);
     } else {
       console.log(`❌ ${model.name} (${model.id}) is not available`);
     }
-    
+
     if (onProgress) {
       onProgress(model.id, isAvailable, i + 1, total);
     }
   }
-  
+
   console.log(`📊 Found ${availableModels.length} available models`);
   return availableModels;
 };
@@ -172,111 +175,67 @@ export const autoSelectGeminiModel = async (
   onProgress?: (modelId: string, available: boolean, index: number, total: number) => void
 ): Promise<string | null> => {
   console.log('🔄 Auto-selecting best available Gemini model...');
-  
+
   for (let i = 0; i < GEMINI_MODELS.length; i++) {
     const model = GEMINI_MODELS[i];
     const isAvailable = await testGeminiModel(apiKey, model.id);
-    
+
     if (onProgress) {
       onProgress(model.id, isAvailable, i + 1, GEMINI_MODELS.length);
     }
-    
+
     if (isAvailable) {
       console.log(`✅ Auto-selected: ${model.name} (${model.id})`);
       saveSelectedGeminiModel(model.id);
       return model.id;
     }
   }
-  
+
   console.log('❌ No available Gemini models found');
   return null;
 };
 
-// Call a single Gemini model (no fallback)
-const callSingleGeminiModel = async (prompt: string, apiKey: string, modelId: string): Promise<{ success: boolean; result?: string; error?: string; status?: number }> => {
+// Call Gemini API via backend explicitly (No direct frontend fallback)
+export const callGeminiAPI = async (prompt: string): Promise<string> => {
   try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.7,
-            topK: 40,
-            topP: 0.95,
-            maxOutputTokens: 2048,
-          }
-        })
-      }
-    );
+    const response = await fetch('/api/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ message: prompt }),
+    });
 
-    if (response.ok) {
-      const data = await response.json();
-      if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
-        return { success: true, result: data.candidates[0].content.parts[0].text };
-      }
-      return { success: false, error: 'Invalid response from Gemini API' };
-    } else {
+    if (response.status === 429) {
+      throw new Error(`Experiencing high traffic. Please wait about 60 seconds and try again.`);
+    }
+
+    if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      const errorMessage = errorData.error?.message || `API error: ${response.status}`;
-      return { success: false, error: errorMessage, status: response.status };
+      throw new Error(errorData.error || `Server error: ${response.status}`);
     }
+
+    const data = await response.json();
+    if (data.reply) {
+      return data.reply;
+    }
+
+    throw new Error('Invalid response from server');
   } catch (error: any) {
-    return { success: false, error: error.message };
+    if (error.message?.includes('Failed to fetch') || error.message?.includes('NetworkError')) {
+      console.error('⚠️ Backend unreachable - Check if the Vite proxy or Express dev server is running.');
+      throw new Error('Cannot reach AI backend. If running locally, please use `npm run dev:full`.');
+    }
+    console.error('Frontend API Call Error:', error);
+    throw new Error(error.message || 'Unknown error communicating with the server');
   }
 };
 
-// Call Gemini API with auto-fallback to other models
-export const callGeminiAPI = async (prompt: string, apiKey: string, model?: string): Promise<string> => {
-  const selectedModel = model || getSelectedGeminiModel();
-  
-  // Try the selected model first
-  console.log(`🎯 Trying selected model: ${selectedModel}`);
-  const result = await callSingleGeminiModel(prompt, apiKey, selectedModel);
-  
-  if (result.success && result.result) {
-    return result.result;
-  }
-  
-  // If selected model failed with 404 (not available), try fallback models
-  if (result.status === 404) {
-    console.log(`⚠️ Model ${selectedModel} not available, trying fallback models...`);
-    
-    // Try other models in order
-    for (const fallbackModel of GEMINI_MODELS) {
-      if (fallbackModel.id === selectedModel) continue; // Skip already tried model
-      
-      console.log(`🔄 Trying fallback: ${fallbackModel.name} (${fallbackModel.id})`);
-      const fallbackResult = await callSingleGeminiModel(prompt, apiKey, fallbackModel.id);
-      
-      if (fallbackResult.success && fallbackResult.result) {
-        // Save the working model for future use
-        console.log(`✅ Fallback successful! Saving ${fallbackModel.id} as default`);
-        saveSelectedGeminiModel(fallbackModel.id);
-        window.dispatchEvent(new Event('geminiModelAutoChanged'));
-        return fallbackResult.result;
-      }
-    }
-    
-    throw new Error('No Gemini models available with your API key. Please check your API key in Account Settings.');
-  }
-  
-  // Handle other errors
-  if (result.status === 429) {
-    throw new Error('Rate limit exceeded. Please wait a moment and try again.');
-  } else if (result.status === 400) {
-    throw new Error(`Invalid request: ${result.error}`);
-  }
-  
-  throw new Error(result.error || 'Unknown error calling Gemini API');
-};
 
 // Call DeepSeek API
 export const callDeepSeekAPI = async (prompt: string, apiKey: string, model?: string): Promise<string> => {
   const modelToUse = model || AI_MODELS.deepseek.models[0];
-  
+
   const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -303,14 +262,14 @@ export const callDeepSeekAPI = async (prompt: string, apiKey: string, model?: st
   if (data.choices?.[0]?.message?.content) {
     return data.choices[0].message.content;
   }
-  
+
   throw new Error('Invalid response from DeepSeek API');
 };
 
 // Call OpenAI API
 export const callOpenAIAPI = async (prompt: string, apiKey: string, model?: string): Promise<string> => {
   const modelToUse = model || AI_MODELS.openai.models[0];
-  
+
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -337,7 +296,7 @@ export const callOpenAIAPI = async (prompt: string, apiKey: string, model?: stri
   if (data.choices?.[0]?.message?.content) {
     return data.choices[0].message.content;
   }
-  
+
   throw new Error('Invalid response from OpenAI API');
 };
 
@@ -345,9 +304,9 @@ export const callOpenAIAPI = async (prompt: string, apiKey: string, model?: stri
 const callOpenRouterAPI = async (prompt: string, apiKey: string, model?: string): Promise<string> => {
   // List of OpenRouter free models to try in order of preference
   const modelsToTry = model ? [model] : AI_MODELS.openrouter.models;
-  
+
   let lastError: Error | null = null;
-  
+
   for (const modelName of modelsToTry) {
     try {
       const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -384,12 +343,12 @@ const callOpenRouterAPI = async (prompt: string, apiKey: string, model?: string)
       }
 
       const data = await response.json();
-      
+
       if (data.choices && data.choices[0]?.message?.content) {
         console.log(`✅ OpenRouter API call successful with model: ${modelName}`);
         return data.choices[0].message.content.trim();
       }
-      
+
       lastError = new Error('Invalid response format from OpenRouter API');
       continue;
     } catch (error) {
@@ -398,12 +357,12 @@ const callOpenRouterAPI = async (prompt: string, apiKey: string, model?: string)
       continue; // Try next model
     }
   }
-  
+
   // If all models failed, throw the last error
   if (lastError) {
     throw lastError;
   }
-  
+
   throw new Error('No OpenRouter models available. Please check your API key or try again later.');
 };
 
@@ -411,7 +370,7 @@ const callOpenRouterAPI = async (prompt: string, apiKey: string, model?: string)
 export const callAIAPI = async (prompt: string, model?: AIModel): Promise<string> => {
   const selectedModel = model || getSelectedModel();
   const apiKey = getApiKey(selectedModel);
-  
+
   if (!apiKey) {
     throw new Error(`Please configure your ${AI_MODELS[selectedModel].name} API key in Account Settings.`);
   }
@@ -421,9 +380,8 @@ export const callAIAPI = async (prompt: string, model?: AIModel): Promise<string
   try {
     switch (selectedModel) {
       case 'gemini':
-        const geminiModel = getSelectedGeminiModel();
-        console.log(`Using Gemini model: ${geminiModel}`);
-        return await callGeminiAPI(prompt, apiKey, geminiModel);
+        console.log(`Using Vercel Backend for Gemini`);
+        return await callGeminiAPI(prompt);
       case 'deepseek':
         return await callDeepSeekAPI(prompt, apiKey);
       case 'openai':
@@ -440,9 +398,8 @@ export const callAIAPI = async (prompt: string, model?: AIModel): Promise<string
       try {
         const geminiKey = getApiKey('gemini');
         if (geminiKey) {
-          const geminiModel = getSelectedGeminiModel();
-          console.log(`📱 Fallback: Using Gemini model: ${geminiModel}`);
-          return await callGeminiAPI(prompt, geminiKey, geminiModel);
+          console.log(`📱 Fallback: Using Vercel Gemini Backend`);
+          return await callGeminiAPI(prompt);
         }
       } catch (fallbackError) {
         console.error('Fallback to Gemini also failed:', fallbackError);

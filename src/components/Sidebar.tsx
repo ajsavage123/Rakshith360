@@ -1,17 +1,15 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { 
-  MessageSquarePlus, 
-  History, 
-  User, 
-  Settings, 
-  HelpCircle, 
+import {
+  MessageSquarePlus,
+  History,
+  Settings,
+  HelpCircle,
   Info,
   X,
   Trash2
 } from "lucide-react";
 import { ChatSession } from "@/lib/storage";
-import AccountSettings from "./AccountSettings";
 
 interface SidebarProps {
   onClose: () => void;
@@ -38,13 +36,11 @@ const Sidebar = ({ onClose, sessions, onNewChat, onSelectSession, onDeleteSessio
   const [activeItem, setActiveItem] = useState("new-chat");
   const [deleteModalSessionId, setDeleteModalSessionId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
-  const [showAccount, setShowAccount] = useState(false);
   const isMobile = useIsMobile();
 
   const menuItems = [
     { id: "new-chat", label: "New Chat", icon: MessageSquarePlus },
     { id: "history", label: "Chat History", icon: History },
-    { id: "account", label: "Account", icon: User },
     { id: "settings", label: "Settings", icon: Settings },
     { id: "help", label: "Help", icon: HelpCircle },
     { id: "about", label: "About", icon: Info },
@@ -74,7 +70,7 @@ const Sidebar = ({ onClose, sessions, onNewChat, onSelectSession, onDeleteSessio
 
       {/* New Chat Button */}
       <div className="p-4">
-        <Button 
+        <Button
           className="w-full bg-blue-600 hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-800 text-white transition-all duration-200 hover:scale-105"
           onClick={() => {
             setActiveItem("new-chat");
@@ -138,13 +134,13 @@ const Sidebar = ({ onClose, sessions, onNewChat, onSelectSession, onDeleteSessio
                 )}
                 {/* Desktop: context menu for delete */}
                 {!isMobile && (
-                <div
-                  onContextMenu={e => {
-                    e.preventDefault();
-                    setDeleteModalSessionId(session.id);
-                  }}
-                  style={{ width: '100%' }}
-                />
+                  <div
+                    onContextMenu={e => {
+                      e.preventDefault();
+                      setDeleteModalSessionId(session.id);
+                    }}
+                    style={{ width: '100%' }}
+                  />
                 )}
               </div>
             ))}
@@ -157,7 +153,6 @@ const Sidebar = ({ onClose, sessions, onNewChat, onSelectSession, onDeleteSessio
             onClick={() => {
               setActiveItem(item.id);
               if (item.id === 'settings') setShowSettings(true);
-              if (item.id === 'account') setShowAccount(true);
             }}
             className={`
               w-full flex items-center px-3 py-2 mb-1 rounded-lg
@@ -221,10 +216,7 @@ const Sidebar = ({ onClose, sessions, onNewChat, onSelectSession, onDeleteSessio
         </div>
       )}
 
-      {/* Account Settings Modal */}
-      {showAccount && (
-        <AccountSettings onClose={() => setShowAccount(false)} />
-      )}
+
     </div>
   );
 };

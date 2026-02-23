@@ -18,24 +18,10 @@ export interface GeocodeResult {
   lon: number;
 }
 
-// Helper function to get API key (priority: localStorage > environment variable)
+// Helper function to get API key (only from environment variable — no client-side exposure)
 const getGeoapifyApiKey = (): string => {
-  // Try to get from localStorage first (user-saved key)
-  try {
-    const savedKey = localStorage.getItem('api_key_geoapify');
-    if (savedKey) {
-      return savedKey;
-    }
-  } catch (error) {
-    console.warn('Error reading Geoapify API key from localStorage:', error);
-  }
-  
-  // Fallback to environment variable
   const envKey = import.meta.env.VITE_GEOAPIFY_API_KEY;
-  if (envKey) {
-    return envKey;
-  }
-  
+  if (envKey) return envKey;
   return 'YOUR_API_KEY_HERE';
 };
 
@@ -54,22 +40,10 @@ class GeoapifyService {
     this.apiKey = GEOAPIFY_API_KEY;
   }
 
-  // Method to get current API key (checks localStorage and env)
+  // Method to get current API key (only from env var)
   private getApiKey(): string {
-    try {
-      const savedKey = localStorage.getItem('api_key_geoapify');
-      if (savedKey) {
-        return savedKey;
-      }
-    } catch (error) {
-      console.warn('Error reading Geoapify API key from localStorage:', error);
-    }
-    
     const envKey = import.meta.env.VITE_GEOAPIFY_API_KEY;
-    if (envKey) {
-      return envKey;
-    }
-    
+    if (envKey) return envKey;
     return this.apiKey;
   }
 
@@ -97,9 +71,9 @@ class GeoapifyService {
         try {
           const query = specialty ? `hospital ${specialty}` : 'hospital';
           const url = `https://api.geoapify.com/v2/places?categories=healthcare.hospital&filter=rect:${location.lng - 0.1},${location.lat - 0.1},${location.lng + 0.1},${location.lat + 0.1}&limit=50&apiKey=${currentApiKey}`;
-          
+
           const data = await this.makeRequest(url);
-          
+
           if (data.features) {
             data.features.forEach((feature: any) => {
               const properties = feature.properties;
@@ -107,7 +81,7 @@ class GeoapifyService {
                 lat: feature.geometry.coordinates[1],
                 lng: feature.geometry.coordinates[0]
               });
-              
+
               if (distance <= searchRadius) {
                 hospitals.push({
                   id: feature.properties.place_id || `geoapify_${Date.now()}_${Math.random()}`,
@@ -140,10 +114,10 @@ class GeoapifyService {
             >;
             out skel qt;
           `;
-          
+
           const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
           const data = await this.makeRequest(url);
-          
+
           if (data.elements) {
             data.elements.forEach((element: any) => {
               if (element.tags && element.tags.amenity === 'hospital') {
@@ -151,13 +125,13 @@ class GeoapifyService {
                   lat: element.lat || element.center?.lat,
                   lng: element.lon || element.center?.lon
                 });
-                
+
                 if (distance <= searchRadius) {
                   hospitals.push({
                     id: `osm_${element.id}`,
                     name: element.tags.name || element.tags['name:en'] || 'Unknown Hospital',
-                    address: element.tags['addr:street'] ? 
-                      `${element.tags['addr:housenumber'] || ''} ${element.tags['addr:street']}, ${element.tags['addr:city'] || ''}`.trim() : 
+                    address: element.tags['addr:street'] ?
+                      `${element.tags['addr:housenumber'] || ''} ${element.tags['addr:street']}, ${element.tags['addr:city'] || ''}`.trim() :
                       'Address not available',
                     phone: element.tags.phone || element.tags['contact:phone'] || 'Phone not available',
                     rating: 0,
@@ -178,16 +152,16 @@ class GeoapifyService {
         try {
           const searchQuery = specialty ? `hospital ${specialty}` : 'hospital';
           const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(searchQuery)}&format=json&limit=20&addressdetails=1&viewbox=${location.lng - 0.1},${location.lat + 0.1},${location.lng + 0.1},${location.lat - 0.1}&bounded=1`;
-          
+
           const data = await this.makeRequest(url);
-          
+
           data.forEach((place: any) => {
             if (place.type === 'hospital' || place.class === 'amenity') {
               const distance = this.calculateDistance(location, {
                 lat: parseFloat(place.lat),
                 lng: parseFloat(place.lon)
               });
-              
+
               if (distance <= searchRadius) {
                 hospitals.push({
                   id: `nominatim_${place.place_id}`,
@@ -222,7 +196,7 @@ class GeoapifyService {
         try {
           const url = `https://api.geoapify.com/v1/geocode/search?text=${encodeURIComponent(address)}&apiKey=${currentApiKey}`;
           const data = await this.makeRequest(url);
-          
+
           if (data.features && data.features.length > 0) {
             const feature = data.features[0];
             return {
@@ -238,14 +212,14 @@ class GeoapifyService {
       // Fallback to Nominatim
       const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1`;
       const data = await this.makeRequest(url);
-      
+
       if (data && data.length > 0) {
         return {
           lat: parseFloat(data[0].lat),
           lon: parseFloat(data[0].lon)
         };
       }
-      
+
       return null;
     } catch (error) {
       console.error('Geocoding failed:', error);
@@ -261,7 +235,7 @@ class GeoapifyService {
         try {
           const url = `https://api.geoapify.com/v1/geocode/reverse?lat=${location.lat}&lon=${location.lng}&apiKey=${currentApiKey}`;
           const data = await this.makeRequest(url);
-          
+
           if (data.features && data.features.length > 0) {
             const properties = data.features[0].properties;
             return properties.city || properties.town || properties.village || properties.county || 'Unknown location';
@@ -280,13 +254,13 @@ class GeoapifyService {
             'User-Agent': 'Medical-Assistant-App (https://github.com/ajsavage123/Rakshith360)'
           }
         });
-        
+
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
-        
+
         const data = await response.json();
-        
+
         if (data.address) {
           return data.address.city || data.address.town || data.address.village || data.address.county || 'Unknown location';
         }
@@ -295,7 +269,7 @@ class GeoapifyService {
         // Return a generic location based on coordinates when CORS blocks the request
         return `Location (${location.lat.toFixed(2)}°, ${location.lng.toFixed(2)}°)`;
       }
-      
+
       return 'Unknown location';
     } catch (error) {
       console.error('Reverse geocoding failed:', error);
@@ -311,8 +285,8 @@ class GeoapifyService {
     const Δλ = (point2.lng - point1.lng) * Math.PI / 180;
 
     const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-              Math.cos(φ1) * Math.cos(φ2) *
-              Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+      Math.cos(φ1) * Math.cos(φ2) *
+      Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
     return R * c;
